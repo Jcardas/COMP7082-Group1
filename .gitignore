@@ -45,3 +45,5 @@ coverage/
 *.zip
 temp/
 exports/
+
+.next
