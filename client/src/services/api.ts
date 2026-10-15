@@ -18,7 +18,7 @@ export async function searchMods(query: string, loader = 'forge', version = '1.2
 }
 
 export async function analyzeDependencies(mods: ModItem[]): Promise<DependencyAnalysisResult> {
-  const res = await fetch(`${BASE_URL}/dependencies/analyze`, {
+  const res = await fetch(`${BASE_URL}/analyze-dependencies`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mods }),
@@ -42,11 +42,11 @@ export async function getRecommendations(
   return data.recommendations || [];
 }
 
-export async function exportModpackZip(modpack: Modpack): Promise<Blob> {
-  const res = await fetch(`${BASE_URL}/export/zip`, {
+export async function exportModpackZip(modpack: Modpack, format = 'curseforge'): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/modpacks/${modpack.id}/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ modpack }),
+    body: JSON.stringify({ modpack, format }),
   });
   if (!res.ok) throw new Error('Failed to export modpack zip');
   return res.blob();

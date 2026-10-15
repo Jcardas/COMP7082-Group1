@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { isConfigured as isEmbeddingConfigured } from '../lib/huggingface.js';
 import { supabase } from '../lib/supabase.js';
 import { analyzeDependencies } from '../services/dependencyGraph.js';
 import { getModpackRecommendations, searchModsWithNLP } from '../services/search.js';
@@ -31,7 +32,7 @@ apiRouter.get('/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     services: {
       supabase: Boolean(supabase),
-      huggingface: Boolean(process.env.HUGGINGFACE_API_KEY),
+      huggingface: isEmbeddingConfigured,
       curseforge: Boolean(process.env.CURSEFORGE_API_KEY),
       modrinth: true,
     },
@@ -46,18 +47,36 @@ apiRouter.get('/search', async (req, res) => {
     const gameVersion = req.query.version ? String(req.query.version) : undefined;
     const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 20;
 
-    const result = await searchModsWithNLP({ query, loader, gameVersion, limit });
-    res.json(result);
+    const searchResults = await searchModsWithNLP({
+      query,
+      loader,
+      gameVersion,
+      limit,
+    });
+
+    res.json(searchResults);
   } catch (error) {
-    console.error('Search endpoint error:', error);
-    res.status(500).json({ error: 'Search failed' });
+    console.error('Search error:', error);
+    res.status(500).json({ error: 'Failed to search mods' });
   }
 });
 
-// 3. Dependency Analysis using Graphlib
-apiRouter.post('/dependencies/analyze', (req, res) => {
+// 3. Modpack Recommendations
+apiRouter.post('/recommendations', async (req, res) => {
   try {
-    const mods: ModItem[] = req.body.mods || [];
+    const { mods = [], loader, gameVersion } = req.body;
+    const recommendations = await getModpackRecommendations(mods, loader, gameVersion);
+    res.json({ recommendations });
+  } catch (error) {
+    console.error('Recommendations error:', error);
+    res.status(500).json({ error: 'Failed to fetch recommendations' });
+  }
+});
+
+// 4. Dependency Conflict & Compatibility Analysis
+apiRouter.post('/analyze-dependencies', (req, res) => {
+  try {
+    const { mods = [] } = req.body;
     const analysis = analyzeDependencies(mods);
     res.json(analysis);
   } catch (error) {
@@ -66,43 +85,16 @@ apiRouter.post('/dependencies/analyze', (req, res) => {
   }
 });
 
-// 4. Modpack Recommendations
-apiRouter.post('/recommendations', async (req, res) => {
-  try {
-    const { mods = [], loader, gameVersion } = req.body;
-    const recommendations = await getModpackRecommendations(mods, loader, gameVersion);
-    res.json({ recommendations });
-  } catch (error) {
-    console.error('Recommendations error:', error);
-    res.status(500).json({ error: 'Failed to generate recommendations' });
-  }
-});
-
-// 5. Export Modpack to Zip via Archiver
-apiRouter.post('/export/zip', async (req, res) => {
-  try {
-    const modpack: Modpack = req.body.modpack;
-    if (!modpack || !modpack.title) {
-      return res.status(400).json({ error: 'Invalid modpack data' });
-    }
-
-    await exportModpackZip(modpack, res);
-  } catch (error) {
-    console.error('Export zip error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to export zip' });
-    }
-  }
-});
-
-// 6. Get Modpack
+// 5. Get Modpack by ID
 apiRouter.get('/modpacks/:id', async (req, res) => {
   const { id } = req.params;
 
   if (supabase) {
     try {
       const { data: pack, error } = await supabase.from('modpacks').select('*').eq('id', id).single();
-      if (!error && pack) {
+      if (error) throw error;
+
+      if (pack) {
         const { data: mods } = await supabase.from('modpack_mods').select('*').eq('modpack_id', id);
         return res.json({ ...pack, mods: mods || [] });
       }
@@ -111,21 +103,25 @@ apiRouter.get('/modpacks/:id', async (req, res) => {
     }
   }
 
-  const fallback = inMemoryModpacks.get(id);
-  if (fallback) {
-    return res.json(fallback);
+  const modpack = inMemoryModpacks.get(id);
+  if (!modpack) {
+    return res.status(404).json({ error: 'Modpack not found' });
   }
 
-  // Create on the fly if not found for easy group demoing
-  const newDemo: Modpack = {
-    id,
-    title: `Modpack #${id.substring(0, 6)}`,
-    minecraftVersion: '1.20.1',
-    modLoader: 'forge',
-    mods: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  inMemoryModpacks.set(id, newDemo);
-  res.json(newDemo);
+  res.json(modpack);
+});
+
+// 6. Export Modpack to CurseForge / Modrinth compatible zip format
+apiRouter.post('/modpacks/:id/export', async (req, res) => {
+  try {
+    const { modpack, format = 'curseforge' } = req.body;
+    if (!modpack) {
+      return res.status(400).json({ error: 'Missing modpack object' });
+    }
+
+    await exportModpackZip(modpack, res, { format });
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Failed to export modpack' });
+  }
 });

@@ -1,5 +1,12 @@
 import React from 'react';
-import { X, CheckCircle2, AlertTriangle, RefreshCw, GitBranch, ArrowRight } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  GitBranch,
+  RefreshCw,
+  X,
+} from 'lucide-react';
 import type { DependencyAnalysisResult } from '../types';
 
 interface DependencyViewerProps {
@@ -20,12 +27,12 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-slate-800 bg-[#0d1226] shadow-2xl overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
           <div className="flex items-center space-x-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30">
               <GitBranch className="h-4 w-4" />
             </div>
             <div>
@@ -37,14 +44,14 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
             <button
               onClick={onRefresh}
               disabled={isLoading}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition disabled:opacity-50"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition disabled:opacity-50 cursor-pointer"
               title="Re-run dependency check"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
@@ -55,8 +62,8 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
         <div className="overflow-y-auto p-6 space-y-5 text-sm">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-3">
-              <RefreshCw className="h-8 w-8 animate-spin text-emerald-500" />
-              <p className="text-xs">Building directed graph & topological sort...</p>
+              <RefreshCw className="h-8 w-8 animate-spin text-violet-500" />
+              <p className="text-xs font-medium">Building directed graph & topological sort...</p>
             </div>
           ) : !analysis ? (
             <p className="text-center text-slate-400 py-8">No mods analyzed yet.</p>
@@ -66,12 +73,12 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
               <div
                 className={`flex items-start space-x-3 rounded-xl p-4 border ${
                   analysis.isValid
-                    ? 'border-emerald-800/40 bg-emerald-950/20 text-emerald-300'
+                    ? 'border-blue-800/40 bg-blue-950/20 text-blue-300'
                     : 'border-amber-800/40 bg-amber-950/20 text-amber-300'
                 }`}
               >
                 {analysis.isValid ? (
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400 mt-0.5" />
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-blue-400 mt-0.5" />
                 ) : (
                   <AlertTriangle className="h-5 w-5 shrink-0 text-amber-400 mt-0.5" />
                 )}
@@ -158,11 +165,11 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="border-t border-slate-800 bg-slate-950/40 px-6 py-3 text-right">
+        {/* Modal Footer */}
+        <div className="border-t border-slate-800 bg-[#090d1f] px-6 py-3 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition"
+            className="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-bold text-white hover:bg-slate-700 transition cursor-pointer"
           >
             Close
           </button>

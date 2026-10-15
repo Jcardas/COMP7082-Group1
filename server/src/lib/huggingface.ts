@@ -1,45 +1,51 @@
-import { HfInference } from '@huggingface/inference';
-import { config } from '../config/index.js';
+import { pipeline } from '@huggingface/transformers';
 
-const isConfigured = Boolean(
-  config.huggingface.apiKey && !config.huggingface.apiKey.includes('your_huggingface_access_token')
-);
+// Singleton promise for the local feature-extraction pipeline
+let extractorPromise: Promise<any> | null = null;
 
-if (!isConfigured) {
-  console.log(
-    'ℹ️  [Hugging Face] HUGGINGFACE_API_KEY is not set. Using keyword matching & Modrinth search until configured.'
-  );
-}
-
-export const hf = isConfigured ? new HfInference(config.huggingface.apiKey) : null;
+const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
 
 /**
- * Generate a dense vector embedding for a given text query or description.
- * Defaults to 'sentence-transformers/all-MiniLM-L6-v2' (384 dimensions).
+ * Get or initialize the local feature-extraction pipeline.
+ * Runs 100% free locally via ONNX Runtime without remote API keys or credit limits.
+ */
+async function getExtractor(): Promise<any> {
+  if (!extractorPromise) {
+    console.log(`🧠 [Local AI] Initializing local embedding pipeline (${MODEL_NAME})...`);
+    extractorPromise = pipeline('feature-extraction', MODEL_NAME, {
+      dtype: 'fp32',
+    });
+  }
+  return extractorPromise;
+}
+
+export const isConfigured = true;
+export const hf = { isLocal: true, model: MODEL_NAME };
+
+/**
+ * Generate a dense vector embedding (384 dimensions) for a given text query or description.
+ * Matches the Supabase 'mod_embeddings' table and 'match_mods' pgvector function.
  */
 export async function generateEmbedding(text: string): Promise<number[] | null> {
-  if (!hf) {
+  const trimmed = text.trim();
+  if (!trimmed) {
     return null;
   }
 
   try {
-    const result = await hf.featureExtraction({
-      model: config.huggingface.embeddingModel,
-      inputs: text.trim(),
+    const extractor = await getExtractor();
+    const output = await extractor(trimmed, {
+      pooling: 'mean',
+      normalize: true,
     });
 
-    if (Array.isArray(result)) {
-      if (typeof result[0] === 'number') {
-        return result as number[];
-      }
-      if (Array.isArray(result[0]) && typeof result[0][0] === 'number') {
-        return result[0] as number[];
-      }
+    if (output && output.data) {
+      return Array.from(output.data) as number[];
     }
 
     return null;
   } catch (error) {
-    console.error('Error generating Hugging Face embedding:', error);
+    console.error('Error generating local embedding:', error);
     return null;
   }
 }

@@ -43,26 +43,29 @@ export const NaturalLanguageSearch: React.FC<NaturalLanguageSearchProps> = ({
   };
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl backdrop-blur-md">
+    <div className="rounded-2xl border border-slate-800/90 bg-[#0d1226]/80 p-5 shadow-xl backdrop-blur-md relative overflow-hidden">
+      {/* Subtle top ambient glow */}
+      <div className="absolute top-0 left-1/4 right-1/4 h-px bg-gradient-to-r from-transparent via-violet-500/50 to-transparent" />
+
       <form onSubmit={handleSubmit} className="space-y-3.5">
         {/* Search Bar */}
         <div className="relative flex items-center">
-          <div className="pointer-events-none absolute left-4 flex items-center text-emerald-400">
+          <div className="pointer-events-none absolute left-4 flex items-center text-violet-400">
             <Sparkles className="h-5 w-5" />
           </div>
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search with AI: e.g. 'I want lightweight performance mods and biome overhaul'..."
-            className="w-full rounded-xl border border-slate-700/80 bg-slate-950/80 py-3.5 pl-12 pr-32 text-sm text-slate-100 placeholder-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition shadow-inner"
+            placeholder="Search with AI: type any full sentence (e.g. 'mods to build automated factories and train lines')..."
+            className="w-full rounded-xl border border-slate-700/80 bg-[#070913]/90 py-3.5 pl-12 pr-32 text-sm text-slate-100 placeholder-slate-400 focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/25 transition shadow-inner"
           />
           <button
             type="submit"
             disabled={isLoading}
-            className="absolute right-2 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow active:scale-95"
+            className="absolute right-2 rounded-lg bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-5 py-2 text-xs font-bold text-white hover:from-blue-500 hover:to-violet-500 disabled:opacity-50 transition shadow-md shadow-blue-900/30 active:scale-95 cursor-pointer"
           >
-            {isLoading ? 'Searching...' : 'AI Search'}
+            {isLoading ? 'Analyzing...' : 'AI Search'}
           </button>
         </div>
 
@@ -71,14 +74,14 @@ export const NaturalLanguageSearch: React.FC<NaturalLanguageSearchProps> = ({
           {/* Natural Language Prompt Pills */}
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto py-1">
             <span className="text-slate-400 flex items-center gap-1 mr-1 font-medium">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-400" /> Prompts:
+              <Sparkles className="h-3.5 w-3.5 text-fuchsia-400" /> Quick Ideas:
             </span>
             {PROMPT_SUGGESTIONS.map((item, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => handleSuggestionClick(item)}
-                className="rounded-full border border-slate-700/70 bg-slate-800/60 px-3 py-1 text-slate-300 hover:border-emerald-500/60 hover:bg-slate-700 hover:text-white transition shadow-sm"
+                className="rounded-full border border-slate-800 bg-slate-900/70 px-3 py-1 text-slate-300 hover:border-violet-500/60 hover:bg-violet-950/40 hover:text-violet-200 transition shadow-sm cursor-pointer"
               >
                 {item}
               </button>
@@ -87,8 +90,8 @@ export const NaturalLanguageSearch: React.FC<NaturalLanguageSearchProps> = ({
 
           {/* Loader & Version selectors */}
           <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center space-x-1.5 rounded-lg border border-slate-700/80 bg-slate-800/80 px-2.5 py-1.5">
-              <Filter className="h-3.5 w-3.5 text-emerald-400" />
+            <div className="flex items-center space-x-1.5 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5">
+              <Filter className="h-3.5 w-3.5 text-blue-400" />
               <select
                 value={selectedLoader}
                 onChange={(e) => onLoaderChange(e.target.value)}
@@ -101,7 +104,7 @@ export const NaturalLanguageSearch: React.FC<NaturalLanguageSearchProps> = ({
               </select>
             </div>
 
-            <div className="flex items-center space-x-1.5 rounded-lg border border-slate-700/80 bg-slate-800/80 px-2.5 py-1.5">
+            <div className="flex items-center space-x-1.5 rounded-lg border border-slate-800 bg-slate-900/90 px-2.5 py-1.5">
               <span className="text-slate-400 font-medium">MC:</span>
               <select
                 value={selectedVersion}

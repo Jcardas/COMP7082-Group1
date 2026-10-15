@@ -11,104 +11,197 @@ export interface NLPSearchParams {
   limit?: number;
 }
 
-// Minecraft Concept Map for Natural Language Understanding
+// In-memory LRU-like cache for mod embeddings to make semantic re-ranking ultra-fast
+const modEmbeddingCache = new Map<string, number[]>();
+
+/**
+ * Calculates cosine similarity between two normalized vectors (dot product).
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (!a || !b || a.length !== b.length || a.length === 0) return 0;
+  let dot = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+  }
+  return dot;
+}
+
+/**
+ * Extensive Minecraft Natural Language Concept Map.
+ * Maps open-ended conversational triggers to categories and authoritative representative mods.
+ */
 const CONCEPT_MAPPINGS: Array<{
   triggers: string[];
   category: string;
   searchKeywords: string[];
 }> = [
   {
-    triggers: ['performance', 'fps', 'lag', 'boost', 'faster', 'fast', 'smooth', 'lightweight', 'optimization', 'speed', 'framerate'],
+    triggers: [
+      'performance', 'fps', 'lag', 'boost', 'faster', 'fast', 'smooth',
+      'lightweight', 'optimization', 'speed', 'framerate', 'memory', 'ram',
+      'potato', 'low end', 'stutter', 'optifine', 'render'
+    ],
     category: 'optimization',
     searchKeywords: ['sodium', 'lithium', 'ferritecore', 'embeddium', 'immediatelyfast', 'modernfix'],
   },
   {
-    triggers: ['magic', 'spell', 'spells', 'wizard', 'witch', 'sorcery', 'mana', 'enchantment', 'alchemy'],
+    triggers: [
+      'magic', 'spell', 'spells', 'wizard', 'witch', 'sorcery', 'mana',
+      'enchantment', 'alchemy', 'wand', 'ritual', 'spellbook', 'grimoire',
+      'druid', 'necromancy', 'cast', 'casting'
+    ],
     category: 'magic',
-    searchKeywords: ['ars nouveau', 'iron spell', 'botania', 'thaumcraft', 'blood magic', 'apotheosis'],
+    searchKeywords: ['ars nouveau', 'iron spell', 'botania', 'thaumcraft', 'blood magic', 'apotheosis', 'mahou tsukai'],
   },
   {
-    triggers: ['tech', 'technology', 'automation', 'machine', 'machinery', 'factory', 'pipe', 'pipes', 'power', 'energy', 'train', 'trains', 'steam'],
+    triggers: [
+      'tech', 'technology', 'automation', 'machine', 'machinery', 'factory',
+      'pipe', 'pipes', 'power', 'energy', 'train', 'trains', 'steam', 'electricity',
+      'contraption', 'conveyor', 'quarry', 'generator', 'gears', 'kinetic', 'rf', 'fe'
+    ],
     category: 'technology',
-    searchKeywords: ['create', 'applied energistics', 'mekanism', 'thermal', 'immersive engineering'],
+    searchKeywords: ['create', 'applied energistics', 'mekanism', 'thermal expansion', 'immersive engineering', 'industrialcraft'],
   },
   {
-    triggers: ['adventure', 'dungeon', 'dungeons', 'boss', 'bosses', 'rpg', 'loot', 'sword', 'swords', 'weapon', 'weapons', 'armor', 'mobs', 'monsters'],
+    triggers: [
+      'adventure', 'dungeon', 'dungeons', 'boss', 'bosses', 'rpg', 'loot',
+      'sword', 'swords', 'weapon', 'weapons', 'armor', 'mobs', 'monsters',
+      'relic', 'structure', 'ruins', 'tower', 'explore', 'quest', 'quests', 'bounty'
+    ],
     category: 'adventure',
-    searchKeywords: ['dungeon', 'bosses of mass destruction', 'cataclysm', 'twilight forest', 'alexs mobs', 'when dungeons arise'],
+    searchKeywords: ['dungeon', 'cataclysm', 'twilight forest', 'alexs mobs', 'when dungeons arise', 'bosses of mass destruction'],
   },
   {
-    triggers: ['biome', 'biomes', 'worldgen', 'world', 'terrain', 'trees', 'nature', 'caves', 'overhaul', 'generation', 'dimension', 'dimensions'],
+    triggers: [
+      'biome', 'biomes', 'worldgen', 'world', 'terrain', 'trees', 'nature',
+      'caves', 'overhaul', 'generation', 'dimension', 'dimensions', 'space',
+      'planet', 'sky', 'ocean', 'nether', 'end', 'landscape'
+    ],
     category: 'worldgen',
-    searchKeywords: ['terralith', 'biomes o plenty', 'alexs caves', 'nullscape', 'regions unexplored', 'incendium'],
+    searchKeywords: ['terralith', 'biomes o plenty', 'alexs caves', 'nullscape', 'regions unexplored', 'ad astra', 'aether'],
   },
   {
-    triggers: ['farm', 'farming', 'food', 'cooking', 'cook', 'kitchen', 'crop', 'crops', 'plant', 'plants', 'chef', 'cozy', 'agriculture'],
+    triggers: [
+      'farm', 'farming', 'food', 'cooking', 'cook', 'kitchen', 'crop', 'crops',
+      'plant', 'plants', 'chef', 'cozy', 'agriculture', 'bakery', 'feast', 'meals', 'orchard'
+    ],
     category: 'food',
     searchKeywords: ['farmers delight', 'cooking for blockheads', 'croptopia', 'pam harvestcraft', 'delight'],
   },
   {
-    triggers: ['storage', 'chest', 'chests', 'backpack', 'backpacks', 'inventory', 'sorting', 'drawer', 'drawers'],
+    triggers: [
+      'storage', 'chest', 'chests', 'backpack', 'backpacks', 'inventory',
+      'sorting', 'drawer', 'drawers', 'barrel', 'barrels', 'pouch', 'digital storage', 'organize'
+    ],
     category: 'storage',
     searchKeywords: ['sophisticated backpacks', 'refined storage', 'functional storage', 'iron chests', 'toms simple storage'],
   },
   {
-    triggers: ['shader', 'shaders', 'graphics', 'visual', 'visuals', 'lighting', 'texture', 'pretty', 'realistic', 'animations'],
-    category: 'utility',
-    searchKeywords: ['iris', 'oculus', 'effective', 'visuality', 'dynamic lights', 'continuity'],
+    triggers: [
+      'shader', 'shaders', 'graphics', 'visual', 'visuals', 'lighting',
+      'texture', 'pretty', 'realistic', 'animations', 'particles', 'photorealistic', 'ray tracing'
+    ],
+    category: 'visual',
+    searchKeywords: ['iris', 'oculus', 'effective', 'visuality', 'dynamic lights', 'continuity', 'complementary'],
   },
   {
-    triggers: ['qol', 'quality of life', 'helper', 'info', 'tooltip', 'gui', 'hud', 'map', 'minimap', 'waypoint'],
+    triggers: [
+      'qol', 'quality of life', 'helper', 'info', 'tooltip', 'gui', 'hud',
+      'map', 'minimap', 'waypoint', 'recipes', 'jei', 'nei', 'guide', 'controls', 'crafting table'
+    ],
     category: 'utility',
-    searchKeywords: ['jei', 'jade', 'xaeros minimap', 'appleskin', 'mouse tweaks', 'clumps'],
+    searchKeywords: ['jei', 'jade', 'xaeros minimap', 'appleskin', 'mouse tweaks', 'clumps', 'journeymap'],
+  },
+  {
+    triggers: [
+      'fly', 'flying', 'flight', 'airplane', 'plane', 'glider', 'paraglider',
+      'wings', 'elytra', 'jetpack', 'vehicle', 'vehicles', 'car', 'ship', 'boat', 'airship', 'mount'
+    ],
+    category: 'transportation',
+    searchKeywords: ['paragliders', 'simple planes', 'immersive aircraft', 'iron jetpacks', 'small ships'],
+  },
+  {
+    triggers: [
+      'gun', 'guns', 'firearm', 'firearms', 'rifle', 'pistol', 'ammo',
+      'bullet', 'ammunition', 'cannon', 'combat', 'shield', 'turret', 'shoot', 'shooting'
+    ],
+    category: 'weapons',
+    searchKeywords: ['timeless and classics zero', 'crayfish gun', 'sculk guns', 'vic point blank', 'apotheosis'],
+  },
+  {
+    triggers: [
+      'horror', 'scary', 'creepypasta', 'fear', 'sanity', 'spooky',
+      'stalker', 'monster', 'darkness', 'hunted', 'nightmare', 'fog', 'creepy', 'man from the fog'
+    ],
+    category: 'horror',
+    searchKeywords: ['from the fog', 'cave dweller', 'the man from the fog', 'weeping angels', 'fear'],
+  },
+  {
+    triggers: [
+      'decoration', 'decor', 'furniture', 'building', 'blocks', 'chisel',
+      'carpentry', 'windows', 'doors', 'lights', 'roof', 'interior', 'props'
+    ],
+    category: 'decoration',
+    searchKeywords: ['chisel', 'macaws furniture', 'handcrafted', 'cluttered', 'architectury'],
+  },
+  {
+    triggers: [
+      'animals', 'creatures', 'wildlife', 'pets', 'dog', 'cat', 'tame',
+      'dragons', 'mythical', 'birds', 'aquatic', 'fish', 'fauna'
+    ],
+    category: 'creatures',
+    searchKeywords: ['alexs mobs', 'ice and fire', 'naturalist', 'mythic mounts', 'aquaculture'],
+  },
+  {
+    triggers: [
+      'multiplayer', 'voice', 'voice chat', 'proximity', 'friends', 'server',
+      'chat', 'emotes', 'coop', 'together'
+    ],
+    category: 'multiplayer',
+    searchKeywords: ['simple voice chat', 'essential', 'audioplayer', 'emotecraft'],
+  },
+  {
+    triggers: [
+      'economy', 'shop', 'money', 'trading', 'npc', 'villagers', 'leveling',
+      'skills', 'talents', 'experience', 'quests', 'questbook'
+    ],
+    category: 'economy',
+    searchKeywords: ['ftb quests', 'custom npcs', 'easy villagers', 'projecte', 'levelz'],
   },
 ];
 
 /**
  * Natural Language Query Parser
- * Extracts concepts, categories, and targeted keywords from user sentences.
+ * Strips conversational filler and extracts key concepts, categories, and search tokens.
  */
-function parseNLPQuery(rawQuery: string): {
+export function parseNLPQuery(rawQuery: string): {
   cleanKeywords: string[];
   matchedCategories: string[];
   targetedQueries: string[];
 } {
   const normalized = rawQuery.toLowerCase().trim();
 
-  // Strip conversational conversational fillers
+  // Strip conversational filler phrases and stop words
   const stopWords = [
-    'i want',
-    'looking for',
-    'mods that',
-    'mod that',
-    'can you give me',
-    'please give me',
-    'i need',
-    'give me',
-    'mods with',
-    'mod with',
-    'a mod for',
-    'mods for',
-    'best',
-    'good',
-    'great',
-    'cool',
-    'some',
-    'and',
-    'with',
-    'the',
-    'for',
-    'minecraft',
-    'mc',
-    'mods',
-    'mod',
+    'i want', 'i need', 'looking for', "i'm looking for", 'can you give me',
+    'please give me', 'can you find', 'give me', 'mods that', 'mod that',
+    'mods with', 'mod with', 'a mod for', 'mods for', 'something that',
+    'something to', 'how to', 'is there a', 'what are some', 'show me',
+    'would like', 'best', 'good', 'great', 'cool', 'some', 'any', 'and',
+    'with', 'the', 'for', 'from', 'about', 'minecraft', 'mc', 'mods',
+    'mod', 'gameplay', 'game', 'like', 'such as', 'into', 'that has',
+    'that adds', 'add', 'adds', 'allow', 'allows', 'able to', 'able',
   ];
 
   let cleaned = normalized;
   for (const sw of stopWords) {
     cleaned = cleaned.replace(new RegExp(`\\b${sw}\\b`, 'gi'), ' ');
   }
-  const cleanTokens = cleaned.split(/\s+/).filter((t) => t.length > 2);
+
+  // Tokenize and filter out single or double-letter noise
+  const cleanTokens = cleaned
+    .split(/[^a-z0-9_-]+/)
+    .filter((t) => t.length > 2);
 
   const matchedCategories: string[] = [];
   const targetedQueries: string[] = [];
@@ -122,11 +215,11 @@ function parseNLPQuery(rawQuery: string): {
       if (!matchedCategories.includes(concept.category)) {
         matchedCategories.push(concept.category);
       }
-      targetedQueries.push(...concept.searchKeywords.slice(0, 2));
+      targetedQueries.push(...concept.searchKeywords.slice(0, 3));
     }
   }
 
-  // If no concepts matched, use the cleaned tokens
+  // If no concepts matched, use the cleaned tokens as queries
   if (targetedQueries.length === 0 && cleanTokens.length > 0) {
     targetedQueries.push(cleanTokens.join(' '));
   }
@@ -138,6 +231,63 @@ function parseNLPQuery(rawQuery: string): {
   };
 }
 
+/**
+ * Background caching of discovered mods into Supabase pgvector table.
+ */
+async function cacheDiscoveredMods(mods: ModItem[]) {
+  if (!supabase || mods.length === 0) return;
+
+  // Run in background without awaiting
+  (async () => {
+    try {
+      const rows = [];
+      for (const mod of mods.slice(0, 8)) {
+        const cacheKey = `${mod.source}:${mod.externalModId}`;
+        let embedding = modEmbeddingCache.get(cacheKey);
+
+        if (!embedding) {
+          const text = `${mod.name}: ${mod.summary || ''}`;
+          const generated = await generateEmbedding(text);
+          if (generated) {
+            embedding = generated;
+            modEmbeddingCache.set(cacheKey, generated);
+          }
+        }
+
+        if (embedding) {
+          rows.push({
+            source: mod.source,
+            external_mod_id: mod.externalModId,
+            title: mod.name,
+            summary: mod.summary || mod.name,
+            categories: mod.categories || [],
+            loaders: mod.loaders || [],
+            game_versions: mod.gameVersions || [],
+            icon_url: mod.iconUrl || null,
+            embedding,
+          });
+        }
+      }
+
+      if (rows.length > 0) {
+        await supabase
+          .from('mod_embeddings')
+          .upsert(rows, { onConflict: 'source,external_mod_id' });
+      }
+    } catch {
+      // Non-fatal background caching error
+    }
+  })();
+}
+
+/**
+ * Core Natural Language Search Function:
+ * 1. Computes local query embedding.
+ * 2. Checks Supabase pgvector `match_mods` for existing vector embeddings.
+ * 3. Expands query via concept matching and retrieves candidates from Modrinth & CurseForge.
+ * 4. Neural Semantic Re-ranking: scores candidates using cosine similarity to the natural query.
+ * 5. Returns ranked results with semantic relevance percentages.
+ */
 export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
   results: ModItem[];
   source: 'pgvector' | 'ai-nlp' | 'api-fallback';
@@ -156,21 +306,32 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
     return { results: topMods, source: 'api-fallback' };
   }
 
-  // 1. Try vector semantic search via Hugging Face + Supabase pgvector if connected
-  if (supabase) {
-    try {
-      const embedding = await generateEmbedding(query);
-      if (embedding) {
-        const { data, error } = await supabase.rpc('match_mods', {
-          query_embedding: embedding,
-          match_threshold: 0.15,
-          match_count: limit,
-          filter_loader: loader || null,
-          filter_version: gameVersion || null,
-        });
+  // 1. Generate local dense vector embedding for the natural language query
+  let queryEmbedding: number[] | null = null;
+  try {
+    queryEmbedding = await generateEmbedding(query);
+  } catch (err) {
+    console.warn('Query embedding generation failed, using keyword fallback:', err);
+  }
 
-        if (!error && data && data.length > 0) {
-          const vectorResults: ModItem[] = data.map((item: any) => ({
+  const candidateMap = new Map<string, ModItem>();
+  let hasPgVectorResults = false;
+
+  // 2. Vector Semantic Search via Supabase pgvector (match_mods)
+  if (supabase && queryEmbedding) {
+    try {
+      const { data, error } = await supabase.rpc('match_mods', {
+        query_embedding: queryEmbedding,
+        match_threshold: 0.18,
+        match_count: limit,
+        filter_loader: loader || null,
+        filter_version: gameVersion || null,
+      });
+
+      if (!error && data && data.length > 0) {
+        hasPgVectorResults = true;
+        for (const item of data) {
+          const modItem: ModItem = {
             id: `${item.source}-${item.external_mod_id}`,
             source: item.source,
             externalModId: item.external_mod_id,
@@ -183,43 +344,32 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
                 ? `https://modrinth.com/mod/${item.external_mod_id}`
                 : `https://www.curseforge.com/minecraft/mc-mods/${item.external_mod_id}`,
             downloads: 0,
+            similarity: item.similarity ? parseFloat(item.similarity.toFixed(3)) : undefined,
             categories: item.categories || [],
             loaders: item.loaders || [],
             gameVersions: item.game_versions || [],
             dependencies: [],
             votes: { yes: [], no: [] },
             comments: [],
-          }));
-
-          return { results: vectorResults, source: 'pgvector' };
+          };
+          candidateMap.set(modItem.id, modItem);
         }
       }
     } catch (err) {
-      console.warn('pgvector search failed, falling back to NLP search:', err);
+      console.warn('pgvector match_mods failed:', err);
     }
   }
 
-  // 2. AI NLP Query Expansion & Intent Matching
+  // 3. Multi-angle NLP Query Expansion & Repository Retrieval
   const { cleanKeywords, matchedCategories, targetedQueries } = parseNLPQuery(query);
 
-  // Search promises: exact query, targeted queries, and category searches
   const searchPromises: Promise<ModItem[]>[] = [];
 
-  // A) Direct exact query
-  searchPromises.push(
-    searchModrinthMods({
-      query: cleanKeywords.join(' ') || query,
-      loader,
-      gameVersion,
-      limit: 15,
-    })
-  );
-
-  // B) Targeted AI keyword searches
-  for (const targeted of targetedQueries.slice(0, 3)) {
+  // A) Search individual clean keywords (so Modrinth doesn't fail on long sentences)
+  for (const token of cleanKeywords.slice(0, 3)) {
     searchPromises.push(
       searchModrinthMods({
-        query: targeted,
+        query: token,
         loader,
         gameVersion,
         limit: 10,
@@ -227,24 +377,48 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
     );
   }
 
-  // C) Category facet search
-  if (matchedCategories.length > 0) {
+  // B) Two-word phrase search if multiple keywords exist
+  if (cleanKeywords.length >= 2) {
     searchPromises.push(
       searchModrinthMods({
-        query: '',
-        categories: matchedCategories,
+        query: cleanKeywords.slice(0, 2).join(' '),
         loader,
         gameVersion,
-        index: 'downloads',
-        limit: 15,
+        limit: 10,
       })
     );
   }
 
-  // D) CurseForge if configured
+  // C) Targeted AI concept queries
+  for (const targeted of targetedQueries.slice(0, 3)) {
+    searchPromises.push(
+      searchModrinthMods({
+        query: targeted,
+        loader,
+        gameVersion,
+        limit: 8,
+      })
+    );
+  }
+
+  // D) Matched Category Facet Search
+  if (matchedCategories.length > 0) {
+    searchPromises.push(
+      searchModrinthMods({
+        query: '',
+        categories: matchedCategories.slice(0, 2),
+        loader,
+        gameVersion,
+        index: 'downloads',
+        limit: 12,
+      })
+    );
+  }
+
+  // E) CurseForge search
   searchPromises.push(
     searchCurseforgeMods({
-      query: cleanKeywords.join(' ') || query,
+      query: cleanKeywords.slice(0, 2).join(' ') || query,
       loader,
       gameVersion,
       limit: 10,
@@ -252,24 +426,81 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
   );
 
   const allResultSets = await Promise.all(searchPromises);
-  const seenIds = new Set<string>();
-  const combined: ModItem[] = [];
-
   for (const set of allResultSets) {
     for (const mod of set) {
-      if (!seenIds.has(mod.id)) {
-        seenIds.add(mod.id);
-        combined.push(mod);
+      if (!candidateMap.has(mod.id)) {
+        candidateMap.set(mod.id, mod);
       }
     }
   }
 
-  // Sort by downloads & relevance
-  combined.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+  const allCandidates = Array.from(candidateMap.values());
+
+  // 4. Neural Semantic Re-ranking
+  // If we have a query embedding, score candidates by semantic similarity to the query
+  if (queryEmbedding && allCandidates.length > 0) {
+    const scoredList: Array<{ mod: ModItem; score: number }> = [];
+
+    // Max downloads for normalization
+    const maxDownloads = Math.max(...allCandidates.map((m) => m.downloads || 0), 1000);
+
+    for (const mod of allCandidates) {
+      let similarity = mod.similarity;
+
+      if (similarity === undefined) {
+        const cacheKey = `${mod.source}:${mod.externalModId}`;
+        let modEmb = modEmbeddingCache.get(cacheKey);
+
+        if (!modEmb) {
+          const modText = `${mod.name}: ${mod.summary || ''}`;
+          try {
+            const generated = await generateEmbedding(modText);
+            if (generated) {
+              modEmb = generated;
+              modEmbeddingCache.set(cacheKey, generated);
+            }
+          } catch {
+            // Skip embedding on error
+          }
+        }
+
+        if (modEmb) {
+          similarity = Math.max(0, cosineSimilarity(queryEmbedding, modEmb));
+          mod.similarity = parseFloat(similarity.toFixed(3));
+        } else {
+          similarity = 0.1;
+        }
+      }
+
+      // Download popularity weight (logarithmic scaling)
+      const popularityScore = Math.log10(Math.max(mod.downloads || 0, 1) + 1) / Math.log10(maxDownloads + 1);
+
+      // Composite ranking: 70% semantic match + 30% popularity
+      const compositeScore = (similarity * 0.70) + (popularityScore * 0.30);
+      scoredList.push({ mod, score: compositeScore });
+    }
+
+    // Sort descending by composite score
+    scoredList.sort((a, b) => b.score - a.score);
+
+    const finalResults = scoredList.slice(0, limit).map((s) => s.mod);
+
+    // Cache discovered mods in background
+    cacheDiscoveredMods(finalResults);
+
+    return {
+      results: finalResults,
+      source: hasPgVectorResults ? 'pgvector' : 'ai-nlp',
+    };
+  }
+
+  // Fallback sorting by downloads if no embedding is available
+  allCandidates.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+  const finalResults = allCandidates.slice(0, limit);
 
   return {
-    results: combined.slice(0, limit),
-    source: matchedCategories.length > 0 ? 'ai-nlp' : 'api-fallback',
+    results: finalResults,
+    source: hasPgVectorResults ? 'pgvector' : 'api-fallback',
   };
 }
 
@@ -313,10 +544,8 @@ export async function getModpackRecommendations(
   const candidateQueries: string[] = [];
 
   if (currentMods.length === 0) {
-    // No mods installed: return popular staples
     candidateQueries.push(...STAPLE_MODS.slice(0, 4));
   } else {
-    // 1. Check for specific companion add-ons
     for (const mod of currentMods) {
       const nameOrSlug = (mod.slug || mod.name).toLowerCase().replace(/[^a-z0-9]/g, '');
       for (const [key, companions] of Object.entries(COMPANION_PAIRS)) {
@@ -326,7 +555,6 @@ export async function getModpackRecommendations(
       }
     }
 
-    // 2. Check installed categories
     const categoryCounts: Record<string, number> = {};
     for (const mod of currentMods) {
       for (const cat of mod.categories || []) {
@@ -334,7 +562,6 @@ export async function getModpackRecommendations(
       }
     }
 
-    // Find top categories
     const sortedCats = Object.entries(categoryCounts)
       .sort((a, b) => b[1] - a[1])
       .map(([cat]) => cat);
@@ -343,7 +570,6 @@ export async function getModpackRecommendations(
       candidateQueries.push(sortedCats[0]);
     }
 
-    // 3. Add staples if not installed
     for (const staple of STAPLE_MODS) {
       if (!existingIds.has(staple)) {
         candidateQueries.push(staple);
@@ -351,7 +577,6 @@ export async function getModpackRecommendations(
     }
   }
 
-  // Fetch candidate mods from Modrinth in parallel
   const searchTasks = candidateQueries.slice(0, 5).map((q) =>
     searchModrinthMods({
       query: q,
@@ -362,7 +587,6 @@ export async function getModpackRecommendations(
     })
   );
 
-  // Also fetch top downloaded mods overall for this loader & version
   searchTasks.push(
     searchModrinthMods({
       query: '',
@@ -388,8 +612,6 @@ export async function getModpackRecommendations(
     }
   }
 
-  // Sort by downloads descending
   recommendations.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
-
   return recommendations.slice(0, 8);
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { X, Download, FileArchive, CheckCircle2, Loader2 } from 'lucide-react';
-import type { Modpack } from '../types';
+import { Download, FileArchive, Loader2, X, CheckCircle2 } from 'lucide-react';
 import { exportModpackZip } from '../services/api';
+import type { Modpack } from '../types';
 
 interface ExportModalProps {
   isOpen: boolean;
@@ -14,7 +14,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   onClose,
   modpack,
 }) => {
-  const [format, setFormat] = useState<'curseforge' | 'modrinth' | 'direct'>('curseforge');
+  const [format, setFormat] = useState<'curseforge' | 'modrinth'>('curseforge');
   const [isExporting, setIsExporting] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
 
@@ -25,32 +25,33 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       setIsExporting(true);
       setDownloadSuccess(false);
 
-      const blob = await exportModpackZip(modpack);
+      const blob = await exportModpackZip(modpack, format);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${modpack.title.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}_v${modpack.minecraftVersion}.zip`;
+      a.download = `${modpack.title.toLowerCase().replace(/[^a-z0-9_-]/g, '_')}_${modpack.minecraftVersion}_${format}.zip`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
       setDownloadSuccess(true);
+      setTimeout(() => {
+        setIsExporting(false);
+      }, 1500);
     } catch (err) {
-      console.error('Export failed:', err);
-      alert('Failed to generate export zip. Check server logs.');
-    } finally {
+      console.error('Export error:', err);
       setIsExporting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-[#0d1226] shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
           <div className="flex items-center space-x-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/15 text-blue-400 ring-1 ring-blue-500/30">
               <FileArchive className="h-4 w-4" />
             </div>
             <div>
@@ -60,7 +61,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white transition cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
@@ -88,10 +89,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <button
                 type="button"
                 onClick={() => setFormat('curseforge')}
-                className={`rounded-lg border p-3 text-left transition ${
+                className={`rounded-lg border p-3 text-left transition cursor-pointer ${
                   format === 'curseforge'
-                    ? 'border-emerald-500 bg-emerald-950/30 text-emerald-300'
-                    : 'border-slate-800 bg-slate-850 text-slate-300 hover:border-slate-700'
+                    ? 'border-violet-500 bg-violet-950/30 text-violet-300 ring-1 ring-violet-500/40'
+                    : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700'
                 }`}
               >
                 <strong className="block text-white">CurseForge Manifest</strong>
@@ -101,10 +102,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <button
                 type="button"
                 onClick={() => setFormat('modrinth')}
-                className={`rounded-lg border p-3 text-left transition ${
+                className={`rounded-lg border p-3 text-left transition cursor-pointer ${
                   format === 'modrinth'
-                    ? 'border-emerald-500 bg-emerald-950/30 text-emerald-300'
-                    : 'border-slate-800 bg-slate-850 text-slate-300 hover:border-slate-700'
+                    ? 'border-violet-500 bg-violet-950/30 text-violet-300 ring-1 ring-violet-500/40'
+                    : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700'
                 }`}
               >
                 <strong className="block text-white">Modrinth (.mrpack)</strong>
@@ -114,25 +115,25 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
 
           {downloadSuccess && (
-            <div className="flex items-center space-x-2 rounded-lg border border-emerald-800/40 bg-emerald-950/20 p-3 text-xs text-emerald-300">
-              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            <div className="flex items-center space-x-2 rounded-lg border border-blue-800/40 bg-blue-950/20 p-3 text-xs text-blue-300">
+              <CheckCircle2 className="h-4 w-4 text-blue-400 shrink-0" />
               <span>Zip archive created and download started!</span>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end space-x-2 border-t border-slate-800 bg-slate-950/40 px-6 py-3">
+        <div className="flex items-center justify-end space-x-2 border-t border-slate-800 bg-[#090d1f] px-6 py-3">
           <button
             onClick={onClose}
-            className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+            className="rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleDownload}
             disabled={isExporting || modpack.mods.length === 0}
-            className="flex items-center space-x-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 transition shadow"
+            className="flex items-center space-x-1.5 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-4 py-2 text-xs font-bold text-white shadow-md shadow-blue-900/30 hover:from-blue-500 hover:to-violet-500 disabled:opacity-50 transition cursor-pointer"
           >
             {isExporting ? (
               <>

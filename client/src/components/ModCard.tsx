@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Trash2, Box, ExternalLink, Download } from 'lucide-react';
+import { Plus, Trash2, Box, ExternalLink, Download, Sparkles } from 'lucide-react';
 import type { ModItem } from '../types';
 import { formatDownloads, getModProjectUrl } from '../utils/format';
 
@@ -21,7 +21,7 @@ export const ModCard: React.FC<ModCardProps> = ({
   const projectUrl = getModProjectUrl(mod);
 
   return (
-    <div className="flex flex-col justify-between rounded-xl border border-slate-800 bg-slate-900/50 p-4 transition-all hover:border-slate-700 hover:bg-slate-900/80 hover:shadow-lg">
+    <div className="flex flex-col justify-between rounded-xl border border-slate-800/80 bg-[#0d1226]/60 p-4 transition-all hover:border-violet-600/50 hover:bg-[#111630]/80 hover:shadow-lg hover:shadow-black/50">
       <div className="space-y-3">
         {/* Header: Icon, Title, and Source Badge */}
         <div className="flex items-start gap-3">
@@ -45,7 +45,7 @@ export const ModCard: React.FC<ModCardProps> = ({
                 href={projectUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="group inline-flex items-center gap-1 truncate text-sm font-bold text-slate-100 hover:text-emerald-400 transition"
+                className="group inline-flex items-center gap-1 truncate text-sm font-bold text-slate-100 hover:text-blue-400 transition"
                 title={`Open ${mod.name} on ${mod.source}`}
               >
                 <span className="truncate">{mod.name}</span>
@@ -55,7 +55,7 @@ export const ModCard: React.FC<ModCardProps> = ({
               <span
                 className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                   mod.source === 'modrinth'
-                    ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/40'
+                    ? 'bg-blue-950/80 text-blue-300 border border-blue-800/40'
                     : 'bg-amber-950/80 text-amber-400 border border-amber-800/40'
                 }`}
               >
@@ -63,10 +63,18 @@ export const ModCard: React.FC<ModCardProps> = ({
               </span>
             </div>
 
-            {/* Downloads count */}
-            <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
-              <Download className="h-3 w-3 text-slate-500" />
-              <span>{formatDownloads(mod.downloads)}</span>
+            {/* Downloads count & AI Match percentage */}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+              <div className="flex items-center gap-1">
+                <Download className="h-3 w-3 text-slate-500" />
+                <span>{formatDownloads(mod.downloads)}</span>
+              </div>
+              {typeof mod.similarity === 'number' && mod.similarity > 0.20 && (
+                <span className="inline-flex items-center gap-1 rounded bg-gradient-to-r from-blue-950/90 to-violet-950/90 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300 border border-violet-500/40 shadow-xs shadow-violet-900/30">
+                  <Sparkles className="h-2.5 w-2.5 text-fuchsia-400" />
+                  {Math.round(mod.similarity * 100)}% Match
+                </span>
+              )}
             </div>
 
             <p className="line-clamp-2 text-xs text-slate-300 mt-1 leading-relaxed">
@@ -81,7 +89,7 @@ export const ModCard: React.FC<ModCardProps> = ({
             {mod.categories.slice(0, 3).map((cat, idx) => (
               <span
                 key={idx}
-                className="rounded bg-slate-800/90 px-1.5 py-0.5 text-[10px] font-medium text-slate-300 border border-slate-700/40"
+                className="rounded bg-slate-900/90 px-1.5 py-0.5 text-[10px] font-medium text-slate-300 border border-slate-800"
               >
                 {cat}
               </span>
@@ -94,7 +102,7 @@ export const ModCard: React.FC<ModCardProps> = ({
       <div className="mt-3.5 flex items-center justify-between border-t border-slate-800/80 pt-3 text-xs">
         {addedBy ? (
           <span className="text-[11px] text-slate-400">
-            Added by <strong className="text-emerald-400">{addedBy}</strong>
+            Added by <strong className="text-violet-400">{addedBy}</strong>
           </span>
         ) : (
           <span className="text-[11px] text-slate-500">
@@ -105,7 +113,7 @@ export const ModCard: React.FC<ModCardProps> = ({
         {isInstalled ? (
           <button
             onClick={() => onRemove(mod.id)}
-            className="flex items-center space-x-1 rounded-md border border-rose-900/60 bg-rose-950/30 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 transition"
+            className="flex items-center space-x-1 rounded-md border border-rose-900/60 bg-rose-950/30 px-2.5 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-900/60 transition cursor-pointer"
           >
             <Trash2 className="h-3.5 w-3.5" />
             <span>Remove</span>
@@ -113,7 +121,7 @@ export const ModCard: React.FC<ModCardProps> = ({
         ) : (
           <button
             onClick={() => onAdd(mod)}
-            className="flex items-center space-x-1 rounded-md bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500 transition active:scale-95 shadow"
+            className="flex items-center space-x-1 rounded-md bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 px-3 py-1 text-xs font-bold text-white shadow-md shadow-blue-900/20 hover:from-blue-500 hover:to-violet-500 transition active:scale-95 cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Add to Pack</span>

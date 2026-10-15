@@ -1,37 +1,45 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Sparkles,
-  Package,
-  MessageSquare,
-  Send,
   Flame,
+  MessageSquare,
+  Package,
+  Send,
+  Sparkles,
 } from 'lucide-react';
-import { Navbar, type ActiveTab } from './components/Navbar';
-import { NaturalLanguageSearch } from './components/NaturalLanguageSearch';
-import { ModCard } from './components/ModCard';
 import { ActiveModpackView } from './components/ActiveModpackView';
 import { DependencyViewer } from './components/DependencyViewer';
 import { ExportModal } from './components/ExportModal';
-import type { DependencyAnalysisResult, ModComment, ModItem, Modpack, UserPresence } from './types';
-import { socket } from './services/socket';
+import { ModCard } from './components/ModCard';
+import { NaturalLanguageSearch } from './components/NaturalLanguageSearch';
+import { Navbar, type ActiveTab } from './components/Navbar';
 import { analyzeDependencies, getModpack, getRecommendations, searchMods } from './services/api';
+import { socket } from './services/socket';
+import type {
+  DependencyAnalysisResult,
+  ModComment,
+  ModItem,
+  Modpack,
+  UserPresence,
+} from './types';
 
-const USER_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4'];
-const RANDOM_COLOR = USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
-const RANDOM_USER = `Crafter_${Math.floor(1000 + Math.random() * 9000)}`;
+// Mock temporary session user for demo real-time collaboration
+const DEFAULT_USER = `Crafter_${Math.floor(100 + Math.random() * 900)}`;
+const USER_COLORS = ['#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4', '#10b981', '#f59e0b'];
+const ASSIGNED_COLOR = USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)];
 
 export function App() {
-  const [modpackId] = useState('demo-modpack');
-  const [currentUser] = useState(RANDOM_USER);
-  const [userColor] = useState(RANDOM_COLOR);
-  const [activeUsers, setActiveUsers] = useState<UserPresence[]>([]);
+  const [currentUser] = useState<string>(DEFAULT_USER);
+  const [userColor] = useState<string>(ASSIGNED_COLOR);
+  const [modpackId] = useState<string>('demo-modpack');
+
+  // Navigation & Active View
   const [activeTab, setActiveTab] = useState<ActiveTab>('pack');
 
-  // Modpack State
+  // Core Modpack State
   const [modpack, setModpack] = useState<Modpack>({
     id: 'demo-modpack',
-    title: 'MCMC Collaborative Modpack',
-    description: 'Peer-reviewed Minecraft modpack created with friends in real-time.',
+    title: 'Collaborative Minecraft Pack',
+    description: 'A custom Minecraft modpack created with teammates featuring automation, adventure, and optimizations!',
     minecraftVersion: '1.20.1',
     modLoader: 'forge',
     mods: [],
@@ -39,9 +47,11 @@ export function App() {
     updatedAt: new Date().toISOString(),
   });
 
+  // Selected global filters
+  const [selectedLoader, setSelectedLoader] = useState<string>('forge');
+  const [selectedVersion, setSelectedVersion] = useState<string>('1.20.1');
+
   // Search & Filter State
-  const [selectedLoader, setSelectedLoader] = useState('forge');
-  const [selectedVersion, setSelectedVersion] = useState('1.20.1');
   const [searchResults, setSearchResults] = useState<ModItem[]>([]);
   const [searchSource, setSearchSource] = useState<string>('');
   const [isSearching, setIsSearching] = useState(false);
@@ -50,33 +60,73 @@ export function App() {
   const [recommendations, setRecommendations] = useState<ModItem[]>([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(false);
 
-  // Dependency Analysis State
-  const [depAnalysis, setDepAnalysis] = useState<DependencyAnalysisResult | null>(null);
-  const [isAnalyzingDeps, setIsAnalyzingDeps] = useState(false);
-  const [isDepModalOpen, setIsDepModalOpen] = useState(false);
-
-  // Export Modal State
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-
-  // Team Chat / Live Log State
-  const [messages, setMessages] = useState<Array<{ id: string; user: string; text: string; timestamp: string }>>([]);
+  // Collaboration State
+  const [activeUsers, setActiveUsers] = useState<UserPresence[]>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; user: string; text: string; time: string }>>([]);
   const [chatInput, setChatInput] = useState('');
 
-  // Notifications
+  // Modals & Analysis
+  const [isDepModalOpen, setIsDepModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [depAnalysis, setDepAnalysis] = useState<DependencyAnalysisResult | null>(null);
+  const [isAnalyzingDeps, setIsAnalyzingDeps] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
-  // 1. Initialize data & join room on mount
+  const showNotification = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3500);
+  };
+
+  const handleSearch = async (query: string, loader: string, version: string) => {
+    try {
+      setIsSearching(true);
+      const data = await searchMods(query, loader, version);
+      setSearchResults(data.results);
+      setSearchSource(data.source);
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const fetchRecommendations = async () => {
+    try {
+      setIsLoadingRecs(true);
+      const recs = await getRecommendations(modpack.mods, selectedLoader, selectedVersion);
+      setRecommendations(recs);
+    } catch (err) {
+      console.error('Error fetching recommendations:', err);
+    } finally {
+      setIsLoadingRecs(false);
+    }
+  };
+
+  const runDependencyCheck = async () => {
+    try {
+      setIsAnalyzingDeps(true);
+      const result = await analyzeDependencies(modpack.mods);
+      setDepAnalysis(result);
+    } catch (err) {
+      console.error('Dependency check failed:', err);
+    } finally {
+      setIsAnalyzingDeps(false);
+    }
+  };
+
+  // Initial Load & Socket Collaboration Setup
   useEffect(() => {
-    // Fetch initial modpack
     getModpack(modpackId)
       .then((pack) => {
-        if (pack && pack.mods) {
+        if (pack) {
           setModpack(pack);
+          setSelectedLoader(pack.modLoader);
+          setSelectedVersion(pack.minecraftVersion);
         }
       })
-      .catch((err) => console.warn('Could not load modpack from backend, using default:', err));
+      .catch((err) => console.warn('Could not fetch modpack from server:', err));
 
-    // Connect & join socket room
+    // Connect to Room
     socket.emit('join_room', {
       modpackId,
       username: currentUser,
@@ -169,54 +219,13 @@ export function App() {
     };
   }, [modpackId, currentUser, userColor]);
 
-  // 2. Refresh recommendations & dependencies when modpack changes
+  // Re-fetch recommendations and re-verify dependencies on mods change
   useEffect(() => {
     runDependencyCheck();
     fetchRecommendations();
   }, [modpack.mods.length, selectedLoader, selectedVersion]);
 
-  const showNotification = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3500);
-  };
-
-  const handleSearch = async (query: string, loader: string, version: string) => {
-    try {
-      setIsSearching(true);
-      const data = await searchMods(query, loader, version);
-      setSearchResults(data.results);
-      setSearchSource(data.source);
-    } catch (err) {
-      console.error('Search error:', err);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const fetchRecommendations = async () => {
-    try {
-      setIsLoadingRecs(true);
-      const recs = await getRecommendations(modpack.mods, selectedLoader, selectedVersion);
-      setRecommendations(recs);
-    } catch (err) {
-      console.error('Recs error:', err);
-    } finally {
-      setIsLoadingRecs(false);
-    }
-  };
-
-  const runDependencyCheck = async () => {
-    try {
-      setIsAnalyzingDeps(true);
-      const analysis = await analyzeDependencies(modpack.mods);
-      setDepAnalysis(analysis);
-    } catch (err) {
-      console.error('Dependency check error:', err);
-    } finally {
-      setIsAnalyzingDeps(false);
-    }
-  };
-
+  // Actions
   const handleAddMod = (mod: ModItem) => {
     const modWithUser: ModItem = {
       ...mod,
@@ -313,8 +322,7 @@ export function App() {
     socket.emit('mod_comment', {
       modpackId,
       modId,
-      text,
-      user: currentUser,
+      comment: newComment,
     });
   };
 
@@ -324,19 +332,20 @@ export function App() {
 
     socket.emit('chat_message', {
       modpackId,
-      text: chatInput.trim(),
       user: currentUser,
+      text: chatInput.trim(),
     });
+
     setChatInput('');
   };
 
   const installedModIds = new Set(modpack.mods.map((m) => m.id));
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#070913] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(99,102,241,0.12),rgba(255,255,255,0))] text-slate-100 flex flex-col font-sans">
       {/* Toast Notification */}
       {notification && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 rounded-xl border border-emerald-500/50 bg-slate-900/95 px-4 py-3 text-sm font-semibold text-emerald-300 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2">
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 rounded-xl border border-violet-500/50 bg-[#0d1226]/95 px-4 py-3 text-sm font-semibold text-violet-200 shadow-2xl shadow-violet-950/60 backdrop-blur-md animate-in slide-in-from-bottom-2">
           <span>{notification}</span>
         </div>
       )}
@@ -381,8 +390,9 @@ export function App() {
             {/* Sidebar: Group Chat & Real-Time Presence */}
             <div className="lg:col-span-4 space-y-4">
               {/* Quick Jump to AI Discovery Card */}
-              <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-5 shadow-lg">
-                <div className="flex items-center space-x-2 text-emerald-400">
+              <div className="rounded-2xl border border-slate-800/80 bg-gradient-to-br from-[#0d1226] to-[#070913] p-5 shadow-lg relative overflow-hidden">
+                <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-blue-500/40 via-violet-500/40 to-transparent" />
+                <div className="flex items-center space-x-2 text-violet-400">
                   <Sparkles className="h-5 w-5" />
                   <h3 className="text-sm font-bold text-white">Need more mods?</h3>
                 </div>
@@ -392,13 +402,13 @@ export function App() {
                 <div className="mt-4 flex gap-2">
                   <button
                     onClick={() => setActiveTab('search')}
-                    className="flex-1 rounded-xl bg-emerald-600/90 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition shadow"
+                    className="flex-1 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 py-2 text-xs font-bold text-white hover:from-blue-500 hover:to-violet-500 transition shadow-md shadow-blue-900/30 cursor-pointer"
                   >
                     AI Search
                   </button>
                   <button
                     onClick={() => setActiveTab('recommendations')}
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-800/80 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 transition"
+                    className="flex-1 rounded-xl border border-slate-700 bg-slate-800/80 py-2 text-xs font-bold text-slate-200 hover:border-violet-500/50 hover:bg-slate-700 transition cursor-pointer"
                   >
                     Recommendations
                   </button>
@@ -406,24 +416,24 @@ export function App() {
               </div>
 
               {/* Team Chat Box */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-xl backdrop-blur-sm">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="rounded-2xl border border-slate-800/80 bg-[#0d1226]/70 p-4 shadow-xl backdrop-blur-sm">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
                   <div className="flex items-center space-x-2">
-                    <MessageSquare className="h-4 w-4 text-emerald-400" />
+                    <MessageSquare className="h-4 w-4 text-blue-400" />
                     <h3 className="font-bold text-xs text-white uppercase tracking-wider">Group Chat</h3>
                   </div>
-                  <span className="text-[10px] text-slate-400">Logged in as {currentUser}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Logged in as {currentUser}</span>
                 </div>
 
                 <div className="mt-3 h-64 overflow-y-auto space-y-2 pr-1 text-xs">
                   {messages.length === 0 ? (
-                    <p className="text-center text-slate-600 py-16 text-[11px] italic">
+                    <p className="text-center text-slate-500 py-16 text-[11px] italic">
                       No messages yet. Chat with teammates in real-time as you curate the modpack!
                     </p>
                   ) : (
                     messages.map((m) => (
                       <div key={m.id} className="rounded-xl bg-slate-950/60 p-2.5 border border-slate-800/60">
-                        <span className="font-bold text-emerald-400 text-[10px] block">
+                        <span className="font-bold text-violet-400 text-[10px] block">
                           {m.user}:
                         </span>
                         <p className="text-slate-300 mt-0.5 leading-relaxed">{m.text}</p>
@@ -438,11 +448,11 @@ export function App() {
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Message your teammates..."
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30"
                   />
                   <button
                     type="submit"
-                    className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition shadow"
+                    className="rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-3 py-2 text-xs font-bold text-white hover:from-blue-500 hover:to-violet-500 transition shadow cursor-pointer"
                   >
                     <Send className="h-3.5 w-3.5" />
                   </button>
@@ -474,15 +484,15 @@ export function App() {
             {/* Search Results Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Sparkles className="h-5 w-5 text-emerald-400" />
+                <Sparkles className="h-5 w-5 text-violet-400" />
                 <h2 className="text-base font-bold text-white">
                   {searchResults.length > 0 ? 'Search Results' : 'Featured Mods'}
                 </h2>
-                <span className="text-xs text-slate-400">({searchResults.length} mods found)</span>
+                <span className="text-xs text-slate-400 font-mono">({searchResults.length} mods found)</span>
               </div>
               {searchSource && (
-                <span className="text-xs text-slate-400 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
-                  Search Engine: <strong className="text-emerald-400">{searchSource}</strong>
+                <span className="text-xs text-slate-400 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-800">
+                  Search Engine: <strong className="text-violet-400">{searchSource}</strong>
                 </span>
               )}
             </div>
@@ -490,7 +500,7 @@ export function App() {
             {/* Results Grid */}
             {isSearching ? (
               <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
-                <div className="h-8 w-8 animate-spin rounded-full border-3 border-emerald-500 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-3 border-violet-500 border-t-transparent" />
                 <p className="text-sm font-medium">Extracting concepts & querying mod repositories...</p>
               </div>
             ) : searchResults.length > 0 ? (
@@ -509,7 +519,7 @@ export function App() {
               <div className="rounded-2xl border border-dashed border-slate-800 p-12 text-center text-slate-400">
                 <Package className="mx-auto h-10 w-10 text-slate-600 mb-2" />
                 <p className="text-sm font-semibold text-slate-300">No mods found matching your query.</p>
-                <p className="text-xs text-slate-500 mt-1">Try one of the suggested prompts above or broaden your search keywords.</p>
+                <p className="text-xs text-slate-500 mt-1">Try typing a sentence describing the gameplay you want or broaden your keywords.</p>
               </div>
             )}
           </div>
@@ -518,10 +528,10 @@ export function App() {
         {/* TAB 3: SMART RECOMMENDATIONS */}
         {activeTab === 'recommendations' && (
           <div className="space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/80 pb-4">
               <div>
                 <div className="flex items-center space-x-2">
-                  <Flame className="h-5 w-5 text-amber-400" />
+                  <Flame className="h-5 w-5 text-fuchsia-400" />
                   <h2 className="text-lg font-bold text-white">Smart Recommendations</h2>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
@@ -532,7 +542,7 @@ export function App() {
               <button
                 onClick={fetchRecommendations}
                 disabled={isLoadingRecs}
-                className="self-start sm:self-auto rounded-xl bg-slate-800 px-3.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition"
+                className="self-start sm:self-auto rounded-xl bg-slate-800/90 border border-slate-700 px-3.5 py-1.5 text-xs font-semibold text-slate-200 hover:border-violet-500/50 hover:bg-slate-700 transition cursor-pointer"
               >
                 {isLoadingRecs ? 'Analyzing...' : 'Refresh Recs'}
               </button>
@@ -540,7 +550,7 @@ export function App() {
 
             {isLoadingRecs ? (
               <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
-                <div className="h-8 w-8 animate-spin rounded-full border-3 border-emerald-500 border-t-transparent" />
+                <div className="h-8 w-8 animate-spin rounded-full border-3 border-violet-500 border-t-transparent" />
                 <p className="text-sm font-medium">Calculating companion synergy & category overlaps...</p>
               </div>
             ) : recommendations.length > 0 ? (
@@ -584,5 +594,4 @@ export function App() {
     </div>
   );
 }
-
 export default App;

@@ -32,6 +32,7 @@ export interface ModItem {
   downloadUrl?: string;
   projectUrl?: string; // Direct link to CurseForge or Modrinth
   downloads?: number;  // Number of downloads from API
+  similarity?: number; // Semantic AI NLP similarity score (0.0 - 1.0)
   filename?: string;
   dependencies: ModDependency[];
   categories: string[];
