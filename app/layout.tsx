@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Minecraft Modpack Team - Authentication',
+  title: 'MCMC - Minecraft Collaborative Modpack Creator',
   description: 'Authentication portal for Minecraft modpack development team',
 }
 

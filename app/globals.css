@@ -12,11 +12,11 @@ body {
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-/* Custom Minecraft/Gaming glow effects */
-.glow-emerald {
-  box-shadow: 0 0 25px -5px rgba(5, 150, 105, 0.3);
+/* Custom MCMC brand glow effects */
+.glow-mcmc {
+  box-shadow: 0 0 25px -5px rgba(0, 169, 233, 0.42);
 }
 
-.glow-emerald-lg {
-  box-shadow: 0 0 40px -10px rgba(5, 150, 105, 0.4);
+.glow-mcmc-lg {
+  box-shadow: 0 0 40px -10px rgba(249, 158, 255, 0.45);
 }

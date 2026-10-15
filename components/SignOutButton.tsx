@@ -29,7 +29,7 @@ export default function SignOutButton() {
     <button
       onClick={handleSignOut}
       disabled={isLoading}
-      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition-all duration-200 border border-slate-700 hover:border-slate-600 disabled:opacity-50 shadow-lg"
+      className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-mcmc-pink text-slate-200 hover:text-slate-950 font-medium text-sm transition-all duration-200 border border-slate-700 hover:border-mcmc-pink disabled:opacity-50 shadow-lg"
     >
       {isLoading ? (
         <div className="w-4 h-4 border-2 border-slate-200 border-t-transparent rounded-full animate-spin" />

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useMemo } from 'react'
+import Image from 'next/image'
 import { createClient } from '@/utils/supabase/client'
 import { Eye, EyeOff, Check, X } from 'lucide-react'
 
@@ -30,9 +31,9 @@ function evaluatePasswordStrength(password: string): PasswordStrength {
   if (score <= 1) {
     return { score, label: 'Weak', level: 'weak', color: '#94A3B8' }
   } else if (score === 2 || score === 3) {
-    return { score, label: 'Medium', level: 'fair', color: '#818CFC' }
+    return { score, label: 'Medium', level: 'fair', color: '#F99EFF' }
   } else {
-    return { score, label: 'Strong', level: 'strong', color: '#3B82F6' }
+    return { score, label: 'Strong', level: 'strong', color: '#00A9E9' }
   }
 }
 
@@ -40,7 +41,7 @@ export default function LoginPage() {
   const [authMode, setAuthMode] = useState<AuthMode>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  
+
   // Password visibility state:
   // - Login: hidden by default (showPassword = false)
   // - Sign Up: visible by default (showPassword = true)
@@ -217,44 +218,42 @@ export default function LoginPage() {
   }
 
   return (
-    <main 
+    <main
       className="min-h-screen flex items-center justify-center p-6 sm:p-10 relative overflow-hidden"
       style={{ backgroundColor: '#0B0F19' }}
     >
       {/* Decorative Gaming Glows */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-mcmc-pink/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="w-full max-w-md relative z-10 my-auto">
         {/* Main Card */}
-        <div 
+        <div
           className="rounded-2xl p-8 sm:p-10 shadow-2xl border backdrop-blur-xl space-y-6"
           style={{ backgroundColor: '#161D2F', borderColor: '#24304A' }}
         >
           {/* Header */}
           <div className="text-center space-y-2">
-            <div 
-              className="inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-lg border mb-1"
-              style={{ 
-                backgroundColor: '#161D2F', 
+            <div
+              className="inline-flex items-center justify-center w-56 h-16 rounded-2xl shadow-lg border mb-1 px-3"
+              style={{
+                backgroundColor: '#161D2F',
                 borderColor: '#24304A',
-                color: '#818CFC'
+                color: '#F99EFF'
               }}
             >
-              <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
+              <Image src="/MCMC.png" alt="MCMC" width={220} height={70} className="h-auto w-full object-contain" priority />
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight" style={{ color: '#F8FAFC' }}>
               {authMode === 'signin' ? 'Log In' : 'Create Account'}
             </h1>
             <p className="text-xs sm:text-sm" style={{ color: '#94A3B8' }}>
-              Minecraft Modpack Team Portal
+              Minecraft Collaborative Modpack Creator
             </p>
           </div>
 
           {/* Error Notification */}
           {errorMessage && (
-            <div 
+            <div
               className="p-4 rounded-xl text-sm flex items-center gap-3 border"
               style={{ backgroundColor: 'rgba(127, 29, 29, 0.4)', borderColor: 'rgba(239, 68, 68, 0.3)', color: '#FCA5A5' }}
             >
@@ -267,11 +266,11 @@ export default function LoginPage() {
 
           {/* Info Notification */}
           {infoMessage && (
-            <div 
+            <div
               className="p-4 rounded-xl text-sm flex items-center gap-3 border"
-              style={{ backgroundColor: 'rgba(6, 78, 59, 0.4)', borderColor: 'rgba(5, 150, 105, 0.3)', color: '#6EE7B7' }}
+              style={{ backgroundColor: 'rgba(0, 169, 233, 0.12)', borderColor: 'rgba(0, 169, 233, 0.35)', color: '#00A9E9' }}
             >
-              <svg className="w-5 h-5 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-5 h-5 text-mcmc-cyan flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
               <span>{infoMessage}</span>
@@ -297,7 +296,7 @@ export default function LoginPage() {
                     borderColor: '#24304A',
                     color: '#F8FAFC',
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
                 />
               </div>
@@ -311,7 +310,7 @@ export default function LoginPage() {
                     type="button"
                     onClick={handleForgotPassword}
                     className="text-xs font-medium transition-colors hover:underline"
-                    style={{ color: '#818CFC' }}
+                    style={{ color: '#F99EFF' }}
                     disabled={loadingAction !== null}
                   >
                     {loadingAction === 'forgot-password' ? 'Sending...' : 'Forgot Password?'}
@@ -330,7 +329,7 @@ export default function LoginPage() {
                       borderColor: '#24304A',
                       color: '#F8FAFC',
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
                   />
                   <button
@@ -351,14 +350,14 @@ export default function LoginPage() {
                 disabled={loadingAction !== null}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                 style={{
-                  backgroundColor: '#3B82F6',
+                  backgroundColor: '#00A9E9',
                   color: '#F8FAFC',
                 }}
                 onMouseEnter={(e) => {
-                  if (loadingAction === null) e.currentTarget.style.backgroundColor = '#818CFC'
+                  if (loadingAction === null) e.currentTarget.style.backgroundColor = '#F99EFF'
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#3B82F6'
+                  e.currentTarget.style.backgroundColor = '#00A9E9'
                 }}
               >
                 {loadingAction === 'signin' ? (
@@ -387,7 +386,7 @@ export default function LoginPage() {
                     borderColor: '#24304A',
                     color: '#F8FAFC',
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
                 />
               </div>
@@ -409,7 +408,7 @@ export default function LoginPage() {
                       borderColor: '#24304A',
                       color: '#F8FAFC',
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
                   />
                   <button
@@ -452,39 +451,39 @@ export default function LoginPage() {
                   <p className="text-[11px] font-medium mb-1" style={{ color: '#94A3B8' }}>
                     Password requirements:
                   </p>
-                  
+
                   <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.minLength ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.minLength ? '#00A9E9' : '#94A3B8' }}>
                       {criteria.minLength ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                     </span>
-                    <span style={{ color: criteria.minLength ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.minLength ? '#00A9E9' : '#94A3B8' }}>
                       At least 8 characters
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasUppercase ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasUppercase ? '#00A9E9' : '#94A3B8' }}>
                       {criteria.hasUppercase ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                     </span>
-                    <span style={{ color: criteria.hasUppercase ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasUppercase ? '#00A9E9' : '#94A3B8' }}>
                       Contains an uppercase letter
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasNumber ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasNumber ? '#00A9E9' : '#94A3B8' }}>
                       {criteria.hasNumber ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                     </span>
-                    <span style={{ color: criteria.hasNumber ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasNumber ? '#00A9E9' : '#94A3B8' }}>
                       Contains a number
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasSpecial ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasSpecial ? '#00A9E9' : '#94A3B8' }}>
                       {criteria.hasSpecial ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                     </span>
-                    <span style={{ color: criteria.hasSpecial ? '#3B82F6' : '#94A3B8' }}>
+                    <span style={{ color: criteria.hasSpecial ? '#00A9E9' : '#94A3B8' }}>
                       Contains a special character
                     </span>
                   </div>
@@ -497,16 +496,16 @@ export default function LoginPage() {
                 disabled={loadingAction !== null || !allCriteriaMet}
                 className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mt-4"
                 style={{
-                  backgroundColor: '#3B82F6',
+                  backgroundColor: '#00A9E9',
                   color: '#F8FAFC',
                 }}
                 onMouseEnter={(e) => {
                   if (loadingAction === null && allCriteriaMet) {
-                    e.currentTarget.style.backgroundColor = '#818CFC'
+                    e.currentTarget.style.backgroundColor = '#F99EFF'
                   }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#3B82F6'
+                  e.currentTarget.style.backgroundColor = '#00A9E9'
                 }}
               >
                 {loadingAction === 'signup' ? (
@@ -527,7 +526,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => handleToggleAuthMode('signup')}
                   className="font-medium hover:underline transition-colors"
-                  style={{ color: '#818CFC' }}
+                  style={{ color: '#F99EFF' }}
                 >
                   Sign up
                 </button>
@@ -539,7 +538,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => handleToggleAuthMode('signin')}
                   className="font-medium hover:underline transition-colors"
-                  style={{ color: '#818CFC' }}
+                  style={{ color: '#F99EFF' }}
                 >
                   Log in
                 </button>
@@ -566,7 +565,7 @@ export default function LoginPage() {
                 borderColor: '#24304A',
                 color: '#F8FAFC',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#24304A')}
             >
               {loadingAction === 'discord' ? (
@@ -589,7 +588,7 @@ export default function LoginPage() {
                 borderColor: '#24304A',
                 color: '#F8FAFC',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#24304A')}
             >
               {loadingAction === 'github' ? (
@@ -612,7 +611,7 @@ export default function LoginPage() {
                 borderColor: '#24304A',
                 color: '#F8FAFC',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#818CFC')}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
               onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#24304A')}
             >
               {loadingAction === 'google' ? (
@@ -631,7 +630,7 @@ export default function LoginPage() {
 
           <div className="pt-4 border-t text-center" style={{ borderColor: '#24304A' }}>
             <p className="text-xs" style={{ color: '#94A3B8' }}>
-              Secured with Supabase Auth &bull; Minecraft Modpack Team
+              Secured with Supabase Auth &bull; MCMC
             </p>
           </div>
         </div>

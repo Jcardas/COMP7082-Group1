@@ -11,8 +11,9 @@ module.exports = {
         slate: {
           950: '#020617',
         },
-        emerald: {
-          600: '#059669',
+        mcmc: {
+          cyan: '#00A9E9',
+          pink: '#F99EFF',
         }
       },
     },
