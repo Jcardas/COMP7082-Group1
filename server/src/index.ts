@@ -49,7 +49,7 @@ server.listen(config.port, () => {
   ------------------------------------------------
   📡 Port:        ${config.port}
   🌐 Client URL:  ${config.clientUrl}
-  📦 Database:    ${config.supabase.url ? 'Connected (Supabase)' : 'Fallback in-memory'}
+  📦 Database:    ${config.supabase.url ? '🔌 Connected (Supabase)' : '🚫 Fallback in-memory'}
   🧠 Vector/NLP:  Enabled (Local all-MiniLM-L6-v2)
   🕹️  CurseForge:  ${config.curseforge.apiKey ? 'Enabled' : 'Disabled (Key missing)'}
   ✨ Modrinth:    Enabled
