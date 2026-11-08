@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { exportModpackZip } from '../services/api';
-import type { Modpack } from '../types';
+import type { Modpack } from '../types/consts';
 
 interface ExportModalProps {
   isOpen: boolean;

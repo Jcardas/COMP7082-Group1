@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { ModItem, Modpack } from '../types';
+import type { ModItem, Modpack } from '../types/consts';
 import { formatDownloads, getModProjectUrl } from '../utils/format';
 import { ModCard } from './ModCard';
 

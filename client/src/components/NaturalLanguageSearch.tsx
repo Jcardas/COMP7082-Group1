@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { COMMON_MC_VERSIONS, POPULAR_MOD_CATEGORIES } from '../types';
+import { COMMON_MC_VERSIONS, POPULAR_MOD_CATEGORIES } from '../types/consts';
 import type { SearchFilterOptions } from '../services/api';
 
 interface NaturalLanguageSearchProps {

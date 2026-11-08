@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { COMMON_MC_VERSIONS, type FriendItem, type Modpack } from '../types';
+import { COMMON_MC_VERSIONS, type FriendItem, type Modpack } from '../types/consts';
 
 interface ModpackProjectsViewProps {
   modpacks: Modpack[];

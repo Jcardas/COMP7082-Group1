@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { FriendItem, UserPresence } from '../types';
+import type { FriendItem, UserPresence } from '../types/consts';
 
 interface CollaborationSidebarProps {
   currentUser: string;

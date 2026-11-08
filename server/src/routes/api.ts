@@ -148,42 +148,44 @@ apiRouter.post('/modpacks', async (req, res) => {
       contributors = [],
       minecraftVersion = '1.20.1',
       modLoader = 'forge',
+      createdBy = 'Anonymous', // Supply a creator identifier
     } = req.body;
 
     if (supabase) {
-      try {
-        const { data: created, error } = await supabase
-          .from('modpacks')
-          .insert({
-            title,
-            description,
-            minecraft_version: minecraftVersion,
-            mod_loader: modLoader,
-          })
-          .select('*')
-          .single();
+      const { data: created, error } = await supabase
+        .from('modpacks')
+        .insert({
+          title,
+          description,
+          minecraft_version: minecraftVersion,
+          mod_loader: modLoader,
+          created_by: createdBy, // Fixed: Satisfies NOT NULL constraint
+        })
+        .select('*')
+        .single();
 
-        if (!error && created) {
-          const pack: Modpack = {
-            id: created.id,
-            title: created.title,
-            description: created.description,
-            imageUrl,
-            contributors,
-            minecraftVersion: created.minecraft_version,
-            modLoader: created.mod_loader,
-            mods: [],
-            createdAt: created.created_at,
-            updatedAt: created.updated_at,
-          };
-          inMemoryModpacks.set(pack.id, pack);
-          return res.status(201).json(pack);
-        }
-      } catch (err) {
-        console.warn('Supabase create modpack fallback to memory:', err);
+      if (error) {
+        // Log the actual Postgres / Supabase error to see why it rejected
+        console.error('Supabase modpack insert failed:', error);
+      } else if (created) {
+        const pack: Modpack = {
+          id: created.id,
+          title: created.title,
+          description: created.description,
+          imageUrl,
+          contributors: contributors.length > 0 ? contributors : [createdBy],
+          minecraftVersion: created.minecraft_version,
+          modLoader: created.mod_loader,
+          mods: [],
+          createdAt: created.created_at,
+          updatedAt: created.updated_at,
+        };
+        inMemoryModpacks.set(pack.id, pack);
+        return res.status(201).json(pack);
       }
     }
 
+    // In-memory fallback if Supabase is unconfigured or unavailable
     const now = new Date().toISOString();
     const newPack: Modpack = {
       id: `pack-${Date.now()}`,

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ModItem } from '../types';
+import type { ModItem } from '../types/consts';
 import { formatDownloads, getModProjectUrl } from '../utils/format';
 
 interface ModCardProps {

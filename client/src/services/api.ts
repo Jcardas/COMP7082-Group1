@@ -1,4 +1,4 @@
-import type { DependencyAnalysisResult, FriendItem, ModItem, Modpack } from '../types';
+import type { DependencyAnalysisResult, FriendItem, ModItem, Modpack } from '../types/consts';
 
 const BASE_URL = '/api';
 

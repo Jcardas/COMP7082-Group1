@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { socket } from '../services/socket';
-import type { ModComment, ModItem, UserPresence } from '../types';
+import type { ModComment, ModItem, UserPresence } from '../types/consts';
 
 export interface CollabUser {
   username: string;

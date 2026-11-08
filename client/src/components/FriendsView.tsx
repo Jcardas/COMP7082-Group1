@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { FriendItem, Modpack } from '../types';
+import type { FriendItem, Modpack } from '../types/consts';
 
 interface FriendsViewProps {
   friends: FriendItem[];

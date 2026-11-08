@@ -14,7 +14,7 @@ import {
   updateModpack as apiUpdateModpack,
 } from '../services/api';
 import { socket } from '../services/socket';
-import type { FriendItem, ModComment, ModItem, Modpack } from '../types';
+import type { FriendItem, ModComment, ModItem, Modpack } from '../types/consts';
 
 const INITIAL_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 

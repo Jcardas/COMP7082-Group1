@@ -1,3 +1,8 @@
+// This file defines various type structures for use in the codebase
+// Its like a CONST file.
+//
+// Reviewed by: Justin C
+//
 export type ModSource = 'modrinth' | 'curseforge';
 
 export interface ModDependency {
@@ -7,11 +12,12 @@ export interface ModDependency {
   dependencyType: 'required' | 'optional' | 'incompatible' | 'embedded';
 }
 
+// Stores information to do with a mod comment
 export interface ModComment {
-  id: string;
-  user: string;
-  text: string;
-  createdAt: string;
+  id: string; // Unique comment ID
+  user: string; // Who is commenting
+  text: string; // The content of the comment
+  createdAt: string; // When it was created.
 }
 
 export interface ModVotes {
@@ -19,6 +25,7 @@ export interface ModVotes {
   no: string[];  // List of usernames who voted no
 }
 
+// Stores information about a mod or modpack.
 export interface ModItem {
   id: string;
   source: ModSource;

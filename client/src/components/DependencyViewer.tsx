@@ -1,5 +1,5 @@
 import React from 'react';
-import type { DependencyAnalysisResult } from '../types';
+import type { DependencyAnalysisResult } from '../types/consts';
 
 interface DependencyViewerProps {
   isOpen: boolean;

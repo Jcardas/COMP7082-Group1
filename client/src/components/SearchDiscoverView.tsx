@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { SearchFilterOptions } from '../services/api';
 import { resolveModDependencies } from '../services/api';
-import type { ModItem, Modpack } from '../types';
+import type { ModItem, Modpack } from '../types/consts';
 import { formatDownloads, getModProjectUrl } from '../utils/format';
 import { NaturalLanguageSearch } from './NaturalLanguageSearch';
 

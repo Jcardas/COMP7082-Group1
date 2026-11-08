@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { analyzeDependencies } from '../services/api';
-import type { DependencyAnalysisResult, ModItem } from '../types';
+import type { DependencyAnalysisResult, ModItem } from '../types/consts';
 
 export function useDependencyAnalysis(mods: ModItem[]) {
   const [cache, setCache] = useState<Record<string, DependencyAnalysisResult>>({});
