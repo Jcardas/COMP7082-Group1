@@ -166,3 +166,74 @@ export interface ModDependenciesResponse {
     } | null;
     dependencies: ModDependency[];
 }
+
+/**
+ * Official Modrinth .mrpack dependency loader keys
+ */
+export type ModrinthLoaderDependencyKey =
+  | 'forge'
+  | 'neoforge'
+  | 'fabric-loader'
+  | 'quilt-loader';
+
+/**
+ * Individual file entry inside modrinth.index.json (Modrinth Pack Format v1)
+ */
+export interface ModrinthPackFile {
+  /** Destination path relative to the Minecraft instance root (e.g. "mods/create.jar") */
+  path: string;
+  /** Cryptographic hashes required by Modrinth format validators */
+  hashes: {
+    sha1: string;
+    sha512: string;
+  };
+  /** Client and server side environment requirements */
+  env?: {
+    client: 'required' | 'optional' | 'unsupported';
+    server: 'required' | 'optional' | 'unsupported';
+  };
+  /** Array of direct HTTPS download URLs */
+  downloads: string[];
+  /** Exact file size in bytes */
+  fileSize: number;
+}
+
+/**
+ * Root structure of modrinth.index.json following Modrinth Pack Format v1
+ */
+export interface ModrinthIndexManifest {
+  formatVersion: 1;
+  game: 'minecraft';
+  versionId: string;
+  name: string;
+  summary?: string;
+  files: ModrinthPackFile[];
+  dependencies: {
+    minecraft: string;
+    [key: string]: string;
+  };
+}
+
+/**
+ * Root structure of CurseForge manifest.json
+ */
+export interface CurseForgeManifest {
+  minecraft: {
+    version: string;
+    modLoaders: Array<{
+      id: string;
+      primary: boolean;
+    }>;
+  };
+  manifestType: 'minecraftModpack';
+  manifestVersion: 1;
+  name: string;
+  version: string;
+  author: string;
+  files: Array<{
+    projectID: number;
+    fileID: number;
+    required: boolean;
+  }>;
+  overrides: string;
+}
