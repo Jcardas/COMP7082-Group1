@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { isConfigured as isEmbeddingConfigured } from '../lib/huggingface.js';
 import { supabase } from '../lib/supabase.js';
 import { analyzeDependencies } from '../services/dependencyGraph.js';
@@ -7,6 +7,8 @@ import {
   resolveRequiredDependenciesForMod,
   searchModsWithNLP,
 } from '../services/search.js';
+import { fetchModDependencies } from '../services/modrinth.js';
+import { ModDependenciesResponse } from '../types/index.js';
 import { exportModpackZip } from '../services/zipExporter.js';
 import { FriendItem, ModItem, Modpack } from '../types/consts.js';
 
@@ -350,3 +352,46 @@ apiRouter.delete('/friends/:id', (req, res) => {
   inMemoryFriends.delete(req.params.id);
   res.status(204).send();
 });
+
+// 13. Get mod dependencies
+interface ModParams {
+  id: string;
+}
+interface ModDependencyQuery {
+  loader?: string;
+  version?: string;
+}
+interface ErrorResponse {
+  error: string;
+}
+
+apiRouter.get('/mods/:id/dependencies',
+  async (
+    req: Request<ModParams, ModDependenciesResponse | ErrorResponse, unknown, ModDependencyQuery>, 
+    res: Response<ModDependenciesResponse | ErrorResponse>
+  ) => {
+  
+    try {
+    const rawId = req.params.id;
+    const loader = typeof req.query.loader === 'string' ? req.query.loader : undefined;
+    const gameVersion = typeof req.query.version === 'string' ? req.query.version : undefined;
+
+    // Narrow id to guarantee single string:
+    const id = Array.isArray(rawId) ? rawId[0] : rawId
+
+    if (!id || typeof id !== 'string' || id.trim().length === 0) {
+      res.status(400).json({ error: 'Missing required mod ID parameter' });
+      return
+    }
+
+    // Call the Modrinth service dependency fetcher
+    const result = await fetchModDependencies(id.trim(), loader, gameVersion);
+
+    res.json(result);
+  } catch (error) {
+    console.error(`Error resolving dependencies for mod ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Failed to fetch mod dependencies' });
+  }
+});
+
+export default apiRouter;
