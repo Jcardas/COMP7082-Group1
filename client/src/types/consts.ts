@@ -86,7 +86,6 @@ export interface DependencyAnalysisResult {
     modName: string;
     missing: ModDependency[];
   }[];
-  installOrder: string[];
 }
 
 export interface UserPresence {
