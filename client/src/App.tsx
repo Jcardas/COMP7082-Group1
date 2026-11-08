@@ -1,3 +1,5 @@
+// Client side main app entry point.
+
 import { useState } from 'react';
 import { ActiveModpackView } from './components/ActiveModpackView';
 import { CollaborationSidebar } from './components/CollaborationSidebar';
