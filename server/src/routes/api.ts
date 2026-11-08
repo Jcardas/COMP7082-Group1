@@ -1,3 +1,5 @@
+// server/src/routes/api.ts
+
 import { Router, Request, Response } from 'express';
 import { isConfigured as isEmbeddingConfigured } from '../lib/huggingface.js';
 import { supabase } from '../lib/supabase.js';
@@ -11,12 +13,25 @@ import { fetchModDependencies } from '../services/modrinth.js';
 import { ModDependenciesResponse } from '../types/index.js';
 import { exportModpackZip } from '../services/zipExporter.js';
 import { FriendItem, ModItem, Modpack } from '../types/consts.js';
+import { validateBody, validateQuery } from '../middleware/validate.js';
+import {
+  addFriendSchema,
+  addModSchema,
+  analyzeDependenciesBodySchema,
+  commentModSchema,
+  createModpackSchema,
+  exportModpackBodySchema,
+  modDependenciesQuerySchema,
+  recommendationsBodySchema,
+  resolveModDependenciesBodySchema,
+  searchQuerySchema,
+  updateModpackSchema,
+  voteModSchema,
+} from '../schemas/modpackSchemas.js';
 
 export const apiRouter = Router();
 
 const inMemoryModpacks = new Map<string, Modpack>();
-
-
 const inMemoryFriends = new Map<string, FriendItem>();
 
 // 1. Health & Status Check
@@ -33,8 +48,8 @@ apiRouter.get('/health', (_req, res) => {
   });
 });
 
-// 2. Natural Language Semantic Search (pgvector + fallback, pagination, source & category filters)
-apiRouter.get('/search', async (req, res) => {
+// 2. Natural Language Semantic Search (validated query parameters)
+apiRouter.get('/search', validateQuery(searchQuerySchema), async (req, res) => {
   try {
     const query = String(req.query.q || '');
     const loader = req.query.loader ? String(req.query.loader) : undefined;
@@ -43,8 +58,8 @@ apiRouter.get('/search', async (req, res) => {
     const sourceParam = req.query.source ? String(req.query.source) : 'both';
     const source =
       sourceParam === 'modrinth' || sourceParam === 'curseforge' ? sourceParam : 'both';
-    const page = req.query.page ? parseInt(String(req.query.page), 10) : 1;
-    const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 10;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 10;
 
     const searchResults = await searchModsWithNLP({
       query,
@@ -64,47 +79,56 @@ apiRouter.get('/search', async (req, res) => {
 });
 
 // 3. Modpack Recommendations
-apiRouter.post('/recommendations', async (req, res) => {
-  try {
-    const { mods = [], loader, gameVersion } = req.body;
-    const recommendations = await getModpackRecommendations(mods, loader, gameVersion);
-    res.json({ recommendations });
-  } catch (error) {
-    console.error('Recommendations error:', error);
-    res.status(500).json({ error: 'Failed to fetch recommendations' });
-  }
-});
-
-// 4. Resolve Required Dependencies for a Mod (for automatic dependency installation)
-apiRouter.post('/resolve-mod-dependencies', async (req, res) => {
-  try {
-    const { mod, loader, gameVersion } = req.body as {
-      mod: ModItem;
-      loader?: string;
-      gameVersion?: string;
-    };
-    if (!mod) {
-      return res.status(400).json({ error: 'Missing mod payload' });
+apiRouter.post(
+  '/recommendations',
+  validateBody(recommendationsBodySchema),
+  async (req, res) => {
+    try {
+      const { mods = [], loader, gameVersion } = req.body;
+      const recommendations = await getModpackRecommendations(mods, loader, gameVersion);
+      res.json({ recommendations });
+    } catch (error) {
+      console.error('Recommendations error:', error);
+      res.status(500).json({ error: 'Failed to fetch recommendations' });
     }
-    const dependencies = await resolveRequiredDependenciesForMod(mod, loader, gameVersion);
-    return res.json({ dependencies });
-  } catch (error) {
-    console.error('Resolve mod dependencies error:', error);
-    return res.status(500).json({ error: 'Failed to resolve mod dependencies' });
   }
-});
+);
+
+// 4. Resolve Required Dependencies for a Mod
+apiRouter.post(
+  '/resolve-mod-dependencies',
+  validateBody(resolveModDependenciesBodySchema),
+  async (req, res) => {
+    try {
+      const { mod, loader, gameVersion } = req.body as {
+        mod: ModItem;
+        loader?: string;
+        gameVersion?: string;
+      };
+      const dependencies = await resolveRequiredDependenciesForMod(mod, loader, gameVersion);
+      return res.json({ dependencies });
+    } catch (error) {
+      console.error('Resolve mod dependencies error:', error);
+      return res.status(500).json({ error: 'Failed to resolve mod dependencies' });
+    }
+  }
+);
 
 // 5. Dependency Conflict & Compatibility Analysis (DAG)
-apiRouter.post('/analyze-dependencies', (req, res) => {
-  try {
-    const { mods = [] } = req.body;
-    const analysis = analyzeDependencies(mods);
-    res.json(analysis);
-  } catch (error) {
-    console.error('Dependency analysis error:', error);
-    res.status(500).json({ error: 'Failed to analyze dependencies' });
+apiRouter.post(
+  '/analyze-dependencies',
+  validateBody(analyzeDependenciesBodySchema),
+  (req, res) => {
+    try {
+      const { mods = [], targetGameVersion, targetLoader } = req.body;
+      const analysis = analyzeDependencies(mods, { targetGameVersion, targetLoader });
+      res.json(analysis);
+    } catch (error) {
+      console.error('Dependency analysis error:', error);
+      res.status(500).json({ error: 'Failed to analyze dependencies' });
+    }
   }
-});
+);
 
 // 6. List Modpacks
 apiRouter.get('/modpacks', async (_req, res) => {
@@ -141,16 +165,16 @@ apiRouter.get('/modpacks', async (_req, res) => {
 });
 
 // 7. Create Modpack
-apiRouter.post('/modpacks', async (req, res) => {
+apiRouter.post('/modpacks', validateBody(createModpackSchema), async (req, res) => {
   try {
     const {
-      title = 'Untitled Modpack',
-      description = '',
-      imageUrl = '/MCMC.png',
-      contributors = [],
-      minecraftVersion = '1.20.1',
-      modLoader = 'forge',
-      createdBy = 'Anonymous', // Supply a creator identifier
+      title,
+      description,
+      imageUrl,
+      contributors,
+      minecraftVersion,
+      modLoader,
+      createdBy,
     } = req.body;
 
     if (supabase) {
@@ -161,13 +185,12 @@ apiRouter.post('/modpacks', async (req, res) => {
           description,
           minecraft_version: minecraftVersion,
           mod_loader: modLoader,
-          created_by: createdBy, // Fixed: Satisfies NOT NULL constraint
+          created_by: createdBy,
         })
         .select('*')
         .single();
 
       if (error) {
-        // Log the actual Postgres / Supabase error to see why it rejected
         console.error('Supabase modpack insert failed:', error);
       } else if (created) {
         const pack: Modpack = {
@@ -211,7 +234,8 @@ apiRouter.post('/modpacks', async (req, res) => {
 
 // 8. Get Modpack by ID
 apiRouter.get('/modpacks/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
   if (supabase) {
     try {
@@ -255,8 +279,9 @@ apiRouter.get('/modpacks/:id', async (req, res) => {
 });
 
 // 9. Update Modpack Metadata / Contributors / Mods State
-apiRouter.patch('/modpacks/:id', async (req, res) => {
-  const { id } = req.params;
+apiRouter.patch('/modpacks/:id', validateBody(updateModpackSchema), async (req, res) => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const existing = inMemoryModpacks.get(id);
   const { title, description, imageUrl, contributors, minecraftVersion, modLoader, mods } =
     req.body as Partial<Modpack> & {
@@ -297,9 +322,110 @@ apiRouter.patch('/modpacks/:id', async (req, res) => {
   return res.json(updated);
 });
 
+// 9a. Add a Mod to a Modpack (validates externalModId, source, name, dependencies)
+apiRouter.post('/modpacks/:id/mods', validateBody(addModSchema), (req, res) => {
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const modpack = inMemoryModpacks.get(id);
+
+  if (!modpack) {
+    return res.status(404).json({ error: 'Modpack not found' });
+  }
+
+  const incomingMod = req.body;
+  const newMod: ModItem = {
+    ...incomingMod,
+    id: incomingMod.id || `${incomingMod.source}-${incomingMod.externalModId}`,
+    votes: incomingMod.votes || { yes: [], no: [] },
+    comments: incomingMod.comments || [],
+  };
+
+  const exists = modpack.mods.some(
+    (m) => m.id === newMod.id || m.externalModId === newMod.externalModId
+  );
+  if (!exists) {
+    modpack.mods.push(newMod);
+    modpack.updatedAt = new Date().toISOString();
+  }
+
+  return res.status(201).json(newMod);
+});
+
+// 9b. Vote on a Mod in a Modpack (validates vote: 'yes' | 'no')
+apiRouter.post(
+  '/modpacks/:id/mods/:modId/vote',
+  validateBody(voteModSchema),
+  (req, res) => {
+    const rawId = req.params.id;
+    const rawModId = req.params.modId;
+    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+    const modId = Array.isArray(rawModId) ? rawModId[0] : rawModId;
+
+    const modpack = inMemoryModpacks.get(id);
+    if (!modpack) {
+      return res.status(404).json({ error: 'Modpack not found' });
+    }
+
+    const mod = modpack.mods.find((m) => m.id === modId || m.externalModId === modId);
+    if (!mod) {
+      return res.status(404).json({ error: 'Mod not found in modpack' });
+    }
+
+    const { vote, userId } = req.body as { vote: 'yes' | 'no'; userId: string };
+    mod.votes = mod.votes || { yes: [], no: [] };
+    mod.votes.yes = mod.votes.yes.filter((u: string) => u !== userId);
+    mod.votes.no = mod.votes.no.filter((u: string) => u !== userId);
+    mod.votes[vote].push(userId);
+
+    return res.json({ modId: mod.id, votes: mod.votes });
+  }
+);
+
+// 9c. Post a Comment on a Mod in a Modpack (validates text min 1, max 1000 chars)
+apiRouter.post(
+  '/modpacks/:id/mods/:modId/comments',
+  validateBody(commentModSchema),
+  (req, res) => {
+    const rawId = req.params.id;
+    const rawModId = req.params.modId;
+    const id = Array.isArray(rawId) ? rawId[0] : rawId;
+    const modId = Array.isArray(rawModId) ? rawModId[0] : rawModId;
+
+    const modpack = inMemoryModpacks.get(id);
+    if (!modpack) {
+      return res.status(404).json({ error: 'Modpack not found' });
+    }
+
+    const mod = modpack.mods.find((m) => m.id === modId || m.externalModId === modId);
+    if (!mod) {
+      return res.status(404).json({ error: 'Mod not found in modpack' });
+    }
+
+    const { text, user, author } = req.body as {
+      text: string;
+      user?: string;
+      author?: string;
+    };
+
+    // Construct ModComment matching the interface in types/consts.ts
+    const newComment = {
+      id: `comment-${Date.now()}`,
+      user: user || author || 'Anonymous',
+      text,
+      createdAt: new Date().toISOString(),
+    };
+
+    mod.comments = mod.comments || [];
+    mod.comments.push(newComment);
+
+    return res.status(201).json(newComment);
+  }
+);
+
 // 10. Delete Modpack
 apiRouter.delete('/modpacks/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   inMemoryModpacks.delete(id);
 
   if (supabase) {
@@ -314,26 +440,26 @@ apiRouter.delete('/modpacks/:id', async (req, res) => {
 });
 
 // 11. Export Modpack to CurseForge / Modrinth compatible zip format
-apiRouter.post('/modpacks/:id/export', async (req, res) => {
-  try {
-    const { modpack, format = 'curseforge' } = req.body;
-    if (!modpack) {
-      return res.status(400).json({ error: 'Missing modpack object' });
+apiRouter.post(
+  '/modpacks/:id/export',
+  validateBody(exportModpackBodySchema),
+  async (req, res) => {
+    try {
+      const { modpack, format = 'curseforge' } = req.body;
+      await exportModpackZip(modpack, res, { format });
+    } catch (error) {
+      console.error('Export error:', error);
+      res.status(500).json({ error: 'Failed to export modpack' });
     }
-
-    await exportModpackZip(modpack, res, { format });
-  } catch (error) {
-    console.error('Export error:', error);
-    res.status(500).json({ error: 'Failed to export modpack' });
   }
-});
+);
 
 // 12. Friends Endpoints
 apiRouter.get('/friends', (_req, res) => {
   res.json({ friends: Array.from(inMemoryFriends.values()) });
 });
 
-apiRouter.post('/friends', (req, res) => {
+apiRouter.post('/friends', validateBody(addFriendSchema), (req, res) => {
   const { username, friendCode } = req.body as { username?: string; friendCode?: string };
   const code = (friendCode || `MCMC-${Math.floor(1000 + Math.random() * 9000)}`).toUpperCase();
   const resolvedName = username?.trim() || `User_${code.split('-')[1] || '100'}`;
@@ -349,49 +475,47 @@ apiRouter.post('/friends', (req, res) => {
 });
 
 apiRouter.delete('/friends/:id', (req, res) => {
-  inMemoryFriends.delete(req.params.id);
+  const rawId = req.params.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  inMemoryFriends.delete(id);
   res.status(204).send();
 });
 
 // 13. Get mod dependencies
-interface ModParams {
-  id: string;
-}
-interface ModDependencyQuery {
-  loader?: string;
-  version?: string;
-}
+// 13. Get mod dependencies
 interface ErrorResponse {
   error: string;
 }
 
-apiRouter.get('/mods/:id/dependencies',
+apiRouter.get(
+  '/mods/:id/dependencies',
+  validateQuery(modDependenciesQuerySchema),
   async (
-    req: Request<ModParams, ModDependenciesResponse | ErrorResponse, unknown, ModDependencyQuery>, 
+    req: Request,
     res: Response<ModDependenciesResponse | ErrorResponse>
   ) => {
-  
     try {
-    const rawId = req.params.id;
-    const loader = typeof req.query.loader === 'string' ? req.query.loader : undefined;
-    const gameVersion = typeof req.query.version === 'string' ? req.query.version : undefined;
+      const rawId = req.params.id;
+      const loader = typeof req.query.loader === 'string' ? req.query.loader : undefined;
+      const gameVersion = typeof req.query.version === 'string' ? req.query.version : undefined;
 
-    // Narrow id to guarantee single string:
-    const id = Array.isArray(rawId) ? rawId[0] : rawId
+      // Narrow id to guarantee single string
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
 
-    if (!id || typeof id !== 'string' || id.trim().length === 0) {
-      res.status(400).json({ error: 'Missing required mod ID parameter' });
-      return
+      if (!id || typeof id !== 'string' || id.trim().length === 0) {
+        res.status(400).json({ error: 'Missing required mod ID parameter' });
+        return;
+      }
+
+      // Call the Modrinth service dependency fetcher
+      const result = await fetchModDependencies(id.trim(), loader, gameVersion);
+
+      res.json(result);
+    } catch (error) {
+      console.error(`Error resolving dependencies for mod ${req.params.id}:`, error);
+      res.status(500).json({ error: 'Failed to fetch mod dependencies' });
     }
-
-    // Call the Modrinth service dependency fetcher
-    const result = await fetchModDependencies(id.trim(), loader, gameVersion);
-
-    res.json(result);
-  } catch (error) {
-    console.error(`Error resolving dependencies for mod ${req.params.id}:`, error);
-    res.status(500).json({ error: 'Failed to fetch mod dependencies' });
   }
-});
+);
 
 export default apiRouter;
