@@ -1,13 +1,25 @@
+// This file manages the huggingface AI system, used to
+// power the semantic vector search functionality allowing
+// users to search for mods using natural language queries.
+//
+// Manages local ONNX runtime embeddings
+//
+// Reviewed by Justin C
+//
+
 import { pipeline } from '@huggingface/transformers';
 
 // Singleton promise for the local feature-extraction pipeline
 let extractorPromise: Promise<any> | null = null;
 
+// The model we're using
 const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
 
 /**
  * Get or initialize the local feature-extraction pipeline.
  * Runs 100% free locally via ONNX Runtime without remote API keys or credit limits.
+ * Its a super small model but it doesn't have to be crazy since its just running semantics
+ * checks against vectors of the same size.
  */
 async function getExtractor(): Promise<any> {
   if (!extractorPromise) {
