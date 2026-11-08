@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS modpacks (
     minecraft_version VARCHAR(32) NOT NULL DEFAULT '1.21.1',
     -- Modloader target; ensures mods added share the same platform
     mod_loader VARCHAR(32) NOT NULL DEFAULT 'forge', -- 'forge', 'fabric', 'neoforge', 'quilt'
-    -- Identifier (user ID) of the owner/creator
-    created_by VARCHAR(128) NOT NULL,
+    -- Identifier (user ID) of the owner/creator; defaults to the Supabase authenticated user ID
+    created_by VARCHAR(128) NOT NULL DEFAULT auth.uid()::text,
 
     -- Automatic UTC audit timestamps for creation and modification tracking
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -127,7 +127,27 @@ CREATE TABLE IF NOT EXISTS mod_embeddings (
 
 
 -- ==============================================================
--- STEP 5: Performance Indexes
+-- STEP 5: Create Collaborators Table
+-- ==============================================================
+-- Manages a list of users authorized to own, edit, or view modpack tables.
+CREATE TABLE IF NOT EXISTS modpack_collaborators (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    modpack_id UUID NOT NULL REFERENCES modpacks(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    role VARCHAR(32) NOT NULL DEFAULT 'editor', -- 'owner', 'editor', 'viewer'
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    UNIQUE(modpack_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_modpack_collaborators_lookup
+ON modpack_collaborators(modpack_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_modpack_collaborators_user_id
+ON modpack_collaborators(user_id);
+
+
+-- ==============================================================
+-- STEP 6: Performance Indexes
 -- ==============================================================
 -- 1. HNSW (Hierarchical Navigable Small World) Index:
 -- Builds a multi-layer graph for fast Approximate Nearest Neighbor (ANN) search.
@@ -146,26 +166,133 @@ ON mod_embeddings USING GIN (loaders);
 CREATE INDEX IF NOT EXISTS idx_mod_embeddings_game_versions
 ON mod_embeddings USING GIN (game_versions);
 
+CREATE INDEX IF NOT EXISTS idx_mod_embeddings_categories
+ON mod_embeddings USING GIN (categories);
+
+CREATE INDEX IF NOT EXISTS idx_mod_embeddings_downloads
+ON mod_embeddings (downloads DESC);
+
 
 -- ==============================================================
--- STEP 6: RPC Function for Natural Language Vector Search
+-- STEP 7: Row Level Security (RLS) & Access Policies
 -- ==============================================================
--- Stored procedure called by the client/backend (e.g., Supabase RPC) to run
--- combined semantic vector search with technical metadata constraints in one round-trip.
--- This is used to find mods that match a search query semantically.
-CREATE OR REPLACE FUNCTION match_mods (
-    query_embedding vector(384),         -- User prompt (the text they enter into the searchbox) embedded into a 384-dim vector just like the mod embeddings.
-    match_threshold float DEFAULT 0.25,  -- Minimum similarity score (0.0 to 1.0) to filter noise
-    match_count int DEFAULT 20,          -- Max number of results returned (LIMIT)
-    filter_loader text DEFAULT NULL,     -- Optional loader filter (e.g., 'neoforge')
-    filter_version text DEFAULT NULL,     -- Optional game version filter (e.g., '1.21.1')
-    filter_categories text[] DEFAULT NULL  -- Optional mod category filter, e.g., ARRAY['technology', 'optimization'] or NULL
+ALTER TABLE modpacks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE modpack_mods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE mod_embeddings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE modpack_collaborators ENABLE ROW LEVEL SECURITY;
 
-    popularity_weight float DEFAULT 0.15 -- Weighted results based on how popular the mod is (downloads) with 0.0 = pure semantic, 1.0  = pure downloads.
+-- Helper security function: checks if the current user can edit a given modpack
+-- SECURITY DEFINER bypasses RLS on modpacks/collaborators during the check, preventing recursion
+CREATE OR REPLACE FUNCTION is_modpack_editor(check_pack_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM modpacks
+        WHERE id = check_pack_id AND created_by = auth.uid()::text
+    )
+    OR EXISTS (
+        SELECT 1 FROM modpack_collaborators
+        WHERE modpack_id = check_pack_id
+          AND user_id = auth.uid()
+          AND role IN ('owner', 'editor')
+    );
+$$;
 
+-- --------------------------------------------------------------
+-- 1. mod_embeddings (Public Search Catalog)
+-- --------------------------------------------------------------
+CREATE POLICY "Allow public read access to mod_embeddings"
+ON mod_embeddings FOR SELECT
+TO anon, authenticated
+USING (true);
+
+-- --------------------------------------------------------------
+-- 2. modpack_collaborators
+-- --------------------------------------------------------------
+CREATE POLICY "View collaborators"
+ON modpack_collaborators FOR SELECT
+TO authenticated
+USING (
+    user_id = auth.uid() OR
+    EXISTS (
+        SELECT 1 FROM modpacks
+        WHERE modpacks.id = modpack_collaborators.modpack_id
+          AND modpacks.created_by = auth.uid()::text
+    )
+);
+
+CREATE POLICY "Manage collaborators"
+ON modpack_collaborators FOR ALL
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 FROM modpacks
+        WHERE modpacks.id = modpack_collaborators.modpack_id
+          AND modpacks.created_by = auth.uid()::text
+    )
 )
--- This is the table of resulting mods, sorted by similarity to the users semantic prompt.
---
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM modpacks
+        WHERE modpacks.id = modpack_collaborators.modpack_id
+          AND modpacks.created_by = auth.uid()::text
+    )
+);
+
+-- --------------------------------------------------------------
+-- 3. modpacks
+-- --------------------------------------------------------------
+CREATE POLICY "Allow viewing modpacks"
+ON modpacks FOR SELECT
+TO anon, authenticated
+USING (true);
+
+CREATE POLICY "Allow creating modpacks"
+ON modpacks FOR INSERT
+TO authenticated
+WITH CHECK (created_by = auth.uid()::text);
+
+CREATE POLICY "Allow modifying modpacks"
+ON modpacks FOR UPDATE
+TO authenticated
+USING (is_modpack_editor(id));
+
+CREATE POLICY "Allow deleting modpacks"
+ON modpacks FOR DELETE
+TO authenticated
+USING (created_by = auth.uid()::text);
+
+-- --------------------------------------------------------------
+-- 4. modpack_mods
+-- --------------------------------------------------------------
+CREATE POLICY "Allow viewing modpack_mods"
+ON modpack_mods FOR SELECT
+TO anon, authenticated
+USING (true);
+
+CREATE POLICY "Allow modifying modpack_mods"
+ON modpack_mods FOR ALL
+TO authenticated
+USING (is_modpack_editor(modpack_id))
+WITH CHECK (is_modpack_editor(modpack_id));
+
+
+-- ==============================================================
+-- STEP 8: RPC Function for Natural Language Vector Search
+-- ==============================================================
+CREATE OR REPLACE FUNCTION match_mods (
+    query_embedding vector(384),
+    match_threshold float DEFAULT 0.25,
+    match_count int DEFAULT 20,
+    filter_loader text DEFAULT NULL,
+    filter_version text DEFAULT NULL,
+    filter_categories text[] DEFAULT NULL,
+    popularity_weight float DEFAULT 0.15
+)
 RETURNS TABLE (
     id UUID,
     source VARCHAR(32),
@@ -196,22 +323,14 @@ BEGIN
             me.game_versions,
             me.icon_url,
             me.downloads,
-            -- Base semantic similarity [0 to 1]
             (1 - (me.embedding <=> query_embedding))::float AS sim,
-            -- Normalized log download score: ln(1 + downloads) / ln(1 + 100,000,000) So that we only focus on differences between mods with very little downloads, instead of only ever getting popular mods.
-            -- Clamped between 0.0 and 1.0
             LEAST(1.0, GREATEST(0.0, ln(1 + me.downloads) / ln(100000001)))::float AS pop_score
         FROM mod_embeddings me
         WHERE
-            -- Match loader filter if provided; if NULL, ignore loader constraint
             (filter_loader IS NULL OR filter_loader = ANY(me.loaders))
-            -- Match version filter if provided; if NULL, ignore version constraint
             AND (filter_version IS NULL OR filter_version = ANY(me.game_versions))
-            -- Match category filter if provided; if NULL, ignore category restraint
-            AND (filter.categories IS NULL OR me.categories && filter_categories)
-            -- Enforce minimum relevance cut-off
+            AND (filter_categories IS NULL OR me.categories && filter_categories)
             AND (1 - (me.embedding <=> query_embedding)) > match_threshold
-            -- Rank nearest vectors first (ascending distance = highest similarity)
     )
     SELECT
         sc.id,
@@ -225,19 +344,17 @@ BEGIN
         sc.icon_url,
         sc.downloads,
         sc.sim AS semantic_similarity,
-        -- Weighted composite score
         ((1.0 - popularity_weight) * sc.sim + popularity_weight * sc.pop_score)::float AS final_score
     FROM scored_candidates sc
     ORDER BY final_score DESC
-    LIMIT match_count; -- Only return the amount of results defined earlier by the limit.
+    LIMIT match_count;
 END;
 $$;
 
 
 -- ==============================================================
--- STEP 7: Automatic Timestamp Update Trigger
+-- STEP 9: Automatic Timestamp Update Trigger
 -- ==============================================================
--- Reusable trigger function: updates the `updated_at` column to current UTC time
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -246,7 +363,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Bind trigger to `modpacks`: automatically sets `updated_at` on every row UPDATE
 DROP TRIGGER IF EXISTS update_modpacks_updated_at ON modpacks;
 CREATE TRIGGER update_modpacks_updated_at
     BEFORE UPDATE ON modpacks
