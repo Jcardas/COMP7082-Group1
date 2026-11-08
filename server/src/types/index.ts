@@ -35,6 +35,67 @@ export interface ModDependency {
 }
 
 /**
+ * Incompatibility conflict diagnostic
+ */
+export interface ModIncompatibility {
+    //  The mod that declared incompatibility
+    sourceModName: string;
+    sourceModId: string;
+
+    // Conflicting mod present
+    conflictingModName: string;
+    conflictingModId: string;
+
+    reason: string;
+}
+
+/**
+ * Diagnostic for mods not compatibile with pack's version
+ */
+export interface ModVersionMismatch {
+    modId: string;
+    modName: string;
+    targetVersion?: string;
+    targetLoader?: string;
+    supportedVersions: string[];
+    supportedLoaders: string[];
+    reason: string;
+}
+
+/**
+ * Missing dependency diagnostic
+ */
+export interface MissingDependencyIssue {
+    modName: string;
+    modId: string;
+    missing: Array <{
+        id?: string;
+        projectId?: string;
+        name: string;
+        type?: DependencyType;
+        dependencyType?: DependencyType;
+    }>;
+}
+
+/**
+ * Result returned by the dependency graph analysis engine
+ */
+export interface DependencyAnalysisResult {
+    // True only if there are no cycles, no missing dependencies, no incompatibilities
+    isValid: boolean;
+    // Circular dependency chains detected
+    cycles: string[][];
+    // Required dependencies declared by mods that are missing
+    missingDependencies: MissingDependencyIssue[];
+    // Conflicting mod pairs detected
+    incompatibilities: ModIncompatibility[];
+    // Mods failing target game version
+    versionMismatches: ModVersionMismatch[];
+    // Step by step topologiccal load/install order
+    installOrder: string[];
+}
+
+/**
  * Raw dependency entry returned by Modrinth API for a version:
  * GET /project/{id}/version
  */
