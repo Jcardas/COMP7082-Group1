@@ -1,3 +1,10 @@
+// Loads the environment variables from .env
+//
+// Maps all the variables to a constant public config object
+//
+// Reviewed by Justin C
+//
+
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -9,6 +16,8 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config();
 
+// Global constant object so every file in the server
+// can access dotenv constant api keys etc.
 export const config = {
   port: parseInt(process.env.PORT || '5001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
