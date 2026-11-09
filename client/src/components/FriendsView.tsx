@@ -1,20 +1,26 @@
 import React, { useState } from 'react';
-import type { FriendItem, Modpack } from '../types/consts';
+import type { FriendItem, Modpack, ModpackInvite } from '../types/consts';
 
 interface FriendsViewProps {
   friends: FriendItem[];
   modpacks: Modpack[];
+  invites?: ModpackInvite[];
   onAddFriend: (payload: { username?: string; friendCode: string }) => Promise<FriendItem>;
   onRemoveFriend: (id: string) => Promise<void>;
   onInviteFriendToModpack: (modpackId: string, username: string) => Promise<void>;
+  onAcceptInvite?: (inviteId: string) => Promise<void>;
+  onDeclineInvite?: (inviteId: string) => Promise<void>;
 }
 
 export const FriendsView: React.FC<FriendsViewProps> = ({
   friends,
   modpacks,
+  invites = [],
   onAddFriend,
   onRemoveFriend,
   onInviteFriendToModpack,
+  onAcceptInvite,
+  onDeclineInvite,
 }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [friendUsername, setFriendUsername] = useState('');
@@ -41,13 +47,15 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
     e.preventDefault();
     if (!invitingFriend || !selectedModpackId) return;
     await onInviteFriendToModpack(selectedModpackId, invitingFriend.username);
-    setInviteMessage(`Invited ${invitingFriend.username} to modpack.`);
+    setInviteMessage(
+      `Invitation sent to ${invitingFriend.username}. They will be permanently added as a collaborator once they accept.`
+    );
   };
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-        <h1 className="text-lg font-bold text-white">Friends</h1>
+        <h1 className="text-lg font-bold text-white">Friends &amp; Invitations</h1>
         <button
           type="button"
           onClick={() => setIsAddModalOpen(true)}
@@ -56,6 +64,48 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
           + Add Friend
         </button>
       </div>
+
+      {/* Pending Modpack Invitations Section */}
+      {invites.length > 0 && (
+        <div className="border border-neutral-700 bg-neutral-950 p-3 text-xs space-y-2">
+          <strong className="text-white block">Modpack Invitations</strong>
+          <div className="space-y-1.5">
+            {invites.map((inv) => (
+              <div
+                key={inv.id}
+                className="flex flex-wrap items-center justify-between gap-2 border border-neutral-800 bg-neutral-900 p-2"
+              >
+                <div>
+                  <span className="font-bold text-white">{inv.modpackTitle}</span>{' '}
+                  <span className="text-neutral-400">
+                    — Invited {inv.invitedUser} (by {inv.invitedBy})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {onAcceptInvite && (
+                    <button
+                      type="button"
+                      onClick={() => void onAcceptInvite(inv.id)}
+                      className="border border-neutral-600 bg-neutral-800 px-2.5 py-1 font-bold text-white hover:bg-neutral-700"
+                    >
+                      Accept Invite
+                    </button>
+                  )}
+                  {onDeclineInvite && (
+                    <button
+                      type="button"
+                      onClick={() => void onDeclineInvite(inv.id)}
+                      className="border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-neutral-400 hover:bg-neutral-900"
+                    >
+                      Decline
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {friends.length === 0 ? (
         <div className="border border-neutral-800 bg-neutral-950 p-6 text-center text-xs text-neutral-400">

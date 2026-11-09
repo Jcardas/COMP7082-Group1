@@ -16,6 +16,7 @@ function computeFriendCode(seed: string): string {
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [localAuthenticated, setLocalAuthenticated] = useState<boolean>(false);
   const [customUsername, setCustomUsername] = useState<string>('');
   const [customEmail, setCustomEmail] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string>('/MCMC.png');
@@ -56,7 +57,12 @@ export function useAuth() {
     };
   }, []);
 
+  const markAuthenticated = useCallback(() => {
+    setLocalAuthenticated(true);
+  }, []);
+
   const signOut = useCallback(async () => {
+    setLocalAuthenticated(false);
     if (!supabase) return;
     const { error } = await supabase.auth.signOut();
     if (error) {
@@ -72,8 +78,9 @@ export function useAuth() {
     (user?.email ? user.email.split('@')[0] : null) ||
     DEFAULT_FALLBACK_USER;
 
+  const userId = user?.id || displayName;
   const email = customEmail.trim() || user?.email || 'crafter@mcmc.local';
-  const friendCode = computeFriendCode(user?.id || displayName);
+  const friendCode = computeFriendCode(userId);
 
   const updateProfile = useCallback(
     async (updates: { username?: string; avatarUrl?: string }) => {
@@ -119,12 +126,14 @@ export function useAuth() {
   return {
     session,
     user,
+    userId,
     displayName,
     email,
     avatarUrl,
     friendCode,
-    isAuthenticated: Boolean(user),
+    isAuthenticated: Boolean(user) || localAuthenticated,
     isLoading,
+    markAuthenticated,
     signOut,
     updateProfile,
     updateUserEmail,

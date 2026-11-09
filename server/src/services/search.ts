@@ -569,7 +569,7 @@ export async function resolveRequiredDependenciesForMod(
     if (mod.source === 'modrinth') {
       const versions = await getModrinthProjectVersions(mod.externalModId, loader, gameVersion);
       const latestVersion = Array.isArray(versions) && versions.length > 0 ? versions[0] : null;
-      const deps: Array<{ project_id?: string; dependency_type?: string }> =
+      const deps: Array<{ project_id?: string | null; dependency_type?: string }> =
         latestVersion?.dependencies || [];
 
       const requiredProjectIds = Array.from(
