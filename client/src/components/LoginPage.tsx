@@ -77,6 +77,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
   // Handle Sign In
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!email || !password) {
       setErrorMessage('Please enter both email and password.');
       return;
@@ -116,6 +117,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
   // Handle Sign Up
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    console.log("SENDING TO SUPABASE - Email:", email, "Password:", password);
+
     if (!email || !password) {
       setErrorMessage('Please fill in all fields.');
       return;

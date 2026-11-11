@@ -96,6 +96,7 @@ export interface UserProfile {
 export interface DependencyAnalysisResult {
   isValid: boolean;
   cycles: string[][];
+  installOrder: string[];
   missingDependencies: {
     modName: string;
     missing: ModDependency[];

@@ -89,6 +89,17 @@ export const DependencyViewer: React.FC<DependencyViewerProps> = ({
                   </div>
                 </div>
               )}
+
+              {analysis.installOrder && analysis.installOrder.length > 0 && (
+                <div className="space-y-2">
+                  <strong className="text-white">Topological Install Order</strong>
+                  <ol className="list-decimal list-inside border border-neutral-800 bg-neutral-900 p-2.5 space-y-1">
+                    {analysis.installOrder.map((modName: string, idx: number) => (
+                      <li key={idx}>{modName}</li>
+                    ))}
+                  </ol>
+                </div>
+              )}
             </>
           )}
         </div>

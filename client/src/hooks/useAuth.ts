@@ -70,6 +70,48 @@ export function useAuth() {
     }
   }, []);
 
+  const signInWithOAuth = useCallback(async (provider: 'discord' | 'github' | 'google') => {
+    if (!supabase) throw new Error('Supabase client not initialized');
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+  }, []);
+
+  const signInWithPassword = useCallback(async (emailInput: string, passwordInput: string) => {
+    if (!supabase) throw new Error('Supabase client not initialized');
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: emailInput,
+      password: passwordInput,
+    });
+    if (error) throw error;
+    return data;
+  }, []);
+
+  const signUp = useCallback(async (emailInput: string, passwordInput: string) => {
+    if (!supabase) throw new Error('Supabase client not initialized');
+    const { data, error } = await supabase.auth.signUp({
+      email: emailInput,
+      password: passwordInput,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) throw error;
+    return data;
+  }, []);
+
+  const resetPasswordForEmail = useCallback(async (emailInput: string) => {
+    if (!supabase) throw new Error('Supabase client not initialized');
+    const { error } = await supabase.auth.resetPasswordForEmail(emailInput, {
+      redirectTo: window.location.origin,
+    });
+    if (error) throw error;
+  }, []);
+
   const displayName =
     customUsername.trim() ||
     user?.user_metadata?.full_name ||
@@ -135,6 +177,10 @@ export function useAuth() {
     isLoading,
     markAuthenticated,
     signOut,
+    signInWithOAuth,
+    signInWithPassword,
+    signUp,
+    resetPasswordForEmail,
     updateProfile,
     updateUserEmail,
     updateUserPassword,
