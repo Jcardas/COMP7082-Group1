@@ -10,6 +10,7 @@ import { PassThrough } from 'stream';
 import { Response } from 'express';
 import {
   mapLoaderToModrinthKey,
+  normalizeDownloadUrl,
   resolveModrinthPackFile,
   buildModrinthIndex,
   buildCurseForgeManifest,
@@ -93,6 +94,21 @@ describe('Zip Exporter Service - Manifests & Stream Pipeline', () => {
     });
   });
 
+  describe('normalizeDownloadUrl()', () => {
+    it('preserves already percent-encoded URLs without double-encoding %2B to %252B', () => {
+      const url =
+        'https://cdn.modrinth.com/data/AANobbMI/versions/uMOpc5uV/sodium-neoforge-0.8.13%2Bmc1.21.1.jar';
+      expect(normalizeDownloadUrl(url)).toBe(url);
+    });
+
+    it('encodes unencoded spaces in download URLs', () => {
+      const url = 'https://cdn.modrinth.com/data/AANobbMI/versions/uMOpc5uV/my mod+1.21.1.jar';
+      expect(normalizeDownloadUrl(url)).toBe(
+        'https://cdn.modrinth.com/data/AANobbMI/versions/uMOpc5uV/my%20mod+1.21.1.jar'
+      );
+    });
+  });
+
   describe('buildModrinthIndex()', () => {
     it('builds a spec-compliant Modrinth v1 manifest with resolved SHA1, SHA512, URL, and fileSize', async () => {
       // Mock Modrinth version API response for Sodium
@@ -155,6 +171,49 @@ describe('Zip Exporter Service - Manifests & Stream Pipeline', () => {
         client: 'required',
         server: 'required',
       });
+    });
+
+    it('does not double-encode %2B in Modrinth CDN download URLs', async () => {
+      const modrinthCdnUrl =
+        'https://cdn.modrinth.com/data/AANobbMI/versions/uMOpc5uV/sodium-neoforge-0.8.13%2Bmc1.21.1.jar';
+
+      vi.mocked(modrinthService.getModrinthProjectVersions).mockResolvedValueOnce([
+        {
+          id: 'uMOpc5uV',
+          project_id: 'AANobbMI',
+          author_id: 'TEZXhE2U',
+          featured: false,
+          name: 'Sodium 0.8.13 for NeoForge 1.21.1',
+          version_number: 'mc1.21.1-0.8.13-neoforge',
+          game_versions: ['1.21.1'],
+          loaders: ['neoforge'],
+          version_type: 'release',
+          date_published: '2026-08-28T20:55:02.593669Z',
+          downloads: 1595535,
+          files: [
+            {
+              hashes: {
+                sha1: MOCK_SHA1,
+                sha512: MOCK_SHA512,
+              },
+              url: modrinthCdnUrl,
+              filename: 'sodium-neoforge-0.8.13+mc1.21.1.jar',
+              primary: true,
+              size: 1292934,
+            },
+          ],
+          dependencies: [],
+        },
+      ]);
+
+      const pack = createSampleModpack();
+      pack.minecraftVersion = '1.21.1';
+      pack.modLoader = 'neoforge';
+
+      const index = await buildModrinthIndex(pack);
+      expect(index.files).toHaveLength(1);
+      expect(index.files[0].downloads).toEqual([modrinthCdnUrl]);
+      expect(index.files[0].downloads[0]).not.toContain('%252B');
     });
 
     it('sanitizes dangerous filenames and generates deterministic fallback hashes when API is offline', async () => {

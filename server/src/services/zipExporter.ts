@@ -71,6 +71,22 @@ export function mapLoaderToModrinthKey(loader: string): ModrinthLoaderDependency
 }
 
 /**
+ * Normalizes a download URL without double-encoding already percent-encoded
+ * sequences (such as `%2B` in Modrinth CDN URLs turning into `%252B`).
+ *
+ * @param rawUrl Download URL returned by an API or mod metadata
+ * @returns Normalized URL safe for modrinth.index.json
+ */
+export function normalizeDownloadUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    return encodeURI(trimmed);
+  }
+}
+
+/**
  * Sanitizes a filename so it is safe to embed inside a `mods/` path
  * without directory traversal (`..`) or illegal characters.
  *
@@ -134,7 +150,7 @@ export async function resolveModrinthPackFile(
         client: mod.clientEnv || 'required',
         server: mod.serverEnv || 'required',
       },
-      downloads: [encodeURI(String(mod.downloadUrl))],
+      downloads: [normalizeDownloadUrl(String(mod.downloadUrl))],
       fileSize: mod.fileSize,
     };
   }
@@ -181,7 +197,7 @@ export async function resolveModrinthPackFile(
             client: 'required',
             server: 'required',
           },
-          downloads: [encodeURI(primaryFile.url)],
+          downloads: [normalizeDownloadUrl(primaryFile.url)],
           fileSize: primaryFile.size > 0 ? primaryFile.size : 1024,
         };
       }
@@ -194,7 +210,7 @@ export async function resolveModrinthPackFile(
   );
   const fallbackHashes = computeDeterministicHashes(`${projectId}:${fallbackFilename}`);
   const fallbackUrl = mod.downloadUrl
-    ? encodeURI(String(mod.downloadUrl))
+    ? normalizeDownloadUrl(String(mod.downloadUrl))
     : `https://cdn.modrinth.com/data/${encodeURIComponent(projectId)}/versions/1.0.0/${encodeURIComponent(fallbackFilename)}`;
 
   return {
