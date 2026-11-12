@@ -53,7 +53,10 @@ export const SearchDiscoverView: React.FC<SearchDiscoverViewProps> = ({
   const [installNotice, setInstallNotice] = useState<string | null>(null);
 
   const openAddModal = async (mod: ModItem) => {
-    const initialPackId = activeModpackId || modpacks[0]?.id || 'demo-modpack';
+    const initialPackId =
+      (activeModpackId && modpacks.some((p) => p.id === activeModpackId)
+        ? activeModpackId
+        : modpacks[0]?.id) || '';
     setModalMod(mod);
     setSelectedPackId(initialPackId);
     setInstallNotice(null);
@@ -264,48 +267,57 @@ export const SearchDiscoverView: React.FC<SearchDiscoverViewProps> = ({
                 <p className="text-neutral-400">{modalMod.summary}</p>
               </div>
 
-              <div>
-                <label className="block text-neutral-400 mb-1">Select Target Modpack</label>
-                <select
-                  value={selectedPackId}
-                  onChange={(e) => void handlePackSelectChange(e.target.value)}
-                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-2 text-white"
-                >
-                  {modpacks.map((pack) => (
-                    <option key={pack.id} value={pack.id}>
-                      {pack.title} (MC {pack.minecraftVersion} - {pack.modLoader.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {modpacks.length === 0 ? (
+                <div className="border border-neutral-800 bg-neutral-900 p-3 text-neutral-300">
+                  You don&apos;t have any modpacks yet. Create a modpack or accept an invite on the
+                  Modpacks page first.
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-neutral-400 mb-1">Select Target Modpack</label>
+                    <select
+                      value={selectedPackId}
+                      onChange={(e) => void handlePackSelectChange(e.target.value)}
+                      className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-2 text-white"
+                    >
+                      {modpacks.map((pack) => (
+                        <option key={pack.id} value={pack.id}>
+                          {pack.title} (MC {pack.minecraftVersion} - {pack.modLoader.toUpperCase()})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Compatibility Status */}
-              <div className="border border-neutral-800 bg-neutral-900 p-2.5 space-y-1">
-                <p>
-                  <strong>Compatibility Check: </strong>
-                  <span className={isCompatible ? 'text-green-400' : 'text-orange-400'}>
-                    {isCompatible
-                      ? 'Compatible with selected modpack'
-                      : 'Warning: Mod metadata may not explicitly list this loader/version'}
-                  </span>
-                </p>
-              </div>
+                  {/* Compatibility Status */}
+                  <div className="border border-neutral-800 bg-neutral-900 p-2.5 space-y-1">
+                    <p>
+                      <strong>Compatibility Check: </strong>
+                      <span className={isCompatible ? 'text-green-400' : 'text-orange-400'}>
+                        {isCompatible
+                          ? 'Compatible with selected modpack'
+                          : 'Warning: Mod metadata may not explicitly list this loader/version'}
+                      </span>
+                    </p>
+                  </div>
 
-              {/* Dependencies Notice */}
-              <div className="border border-neutral-800 bg-neutral-900 p-2.5 space-y-1">
-                <strong className="block text-white">Required Dependencies to Install:</strong>
-                {isCheckingDeps ? (
-                  <p className="text-neutral-400">Checking dependencies...</p>
-                ) : previewDeps.length === 0 ? (
-                  <p className="text-neutral-400">No additional required dependencies.</p>
-                ) : (
-                  <ul className="list-disc list-inside text-neutral-300">
-                    {previewDeps.map((dep) => (
-                      <li key={dep.id}>{dep.name} (Will be automatically installed)</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                  {/* Dependencies Notice */}
+                  <div className="border border-neutral-800 bg-neutral-900 p-2.5 space-y-1">
+                    <strong className="block text-white">Required Dependencies to Install:</strong>
+                    {isCheckingDeps ? (
+                      <p className="text-neutral-400">Checking dependencies...</p>
+                    ) : previewDeps.length === 0 ? (
+                      <p className="text-neutral-400">No additional required dependencies.</p>
+                    ) : (
+                      <ul className="list-disc list-inside text-neutral-300">
+                        {previewDeps.map((dep) => (
+                          <li key={dep.id}>{dep.name} (Will be automatically installed)</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </>
+              )}
 
               {installNotice && (
                 <div className="border border-neutral-600 bg-neutral-900 p-2.5 text-white">
@@ -325,7 +337,7 @@ export const SearchDiscoverView: React.FC<SearchDiscoverViewProps> = ({
               <button
                 type="button"
                 onClick={() => void handleConfirmAdd()}
-                disabled={isCheckingDeps}
+                disabled={isCheckingDeps || !selectedPackId}
                 className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white hover:bg-neutral-700 disabled:opacity-50"
               >
                 Confirm &amp; Add Mod

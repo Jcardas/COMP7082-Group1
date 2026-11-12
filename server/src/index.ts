@@ -22,7 +22,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: [config.clientUrl, 'http://localhost:3000', 'http://localhost:5173'],
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     credentials: true,
   },
 });
@@ -34,7 +34,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.use('/api', apiRouter);

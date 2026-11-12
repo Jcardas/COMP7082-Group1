@@ -1,30 +1,39 @@
 import React, { useState } from 'react';
-import type { FriendItem, Modpack, ModpackInvite } from '../types/consts';
+import type { FriendItem, FriendRequest, Modpack, ModpackInvite } from '../types/consts';
 
 interface FriendsViewProps {
   friends: FriendItem[];
+  incomingFriendRequests?: FriendRequest[];
+  outgoingFriendRequests?: FriendRequest[];
   modpacks: Modpack[];
   invites?: ModpackInvite[];
-  onAddFriend: (payload: { username?: string; friendCode: string }) => Promise<FriendItem>;
+  onSendFriendRequest: (friendCode: string) => Promise<FriendRequest>;
+  onAcceptFriendRequest: (requestId: string) => Promise<FriendItem>;
+  onDeclineFriendRequest: (requestId: string) => Promise<void>;
   onRemoveFriend: (id: string) => Promise<void>;
-  onInviteFriendToModpack: (modpackId: string, username: string) => Promise<void>;
+  onInviteFriendToModpack: (modpackId: string, friendCodeOrUsername: string) => Promise<void>;
   onAcceptInvite?: (inviteId: string) => Promise<void>;
   onDeclineInvite?: (inviteId: string) => Promise<void>;
 }
 
 export const FriendsView: React.FC<FriendsViewProps> = ({
   friends,
+  incomingFriendRequests = [],
+  outgoingFriendRequests = [],
   modpacks,
   invites = [],
-  onAddFriend,
+  onSendFriendRequest,
+  onAcceptFriendRequest,
+  onDeclineFriendRequest,
   onRemoveFriend,
   onInviteFriendToModpack,
   onAcceptInvite,
   onDeclineInvite,
 }) => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [friendUsername, setFriendUsername] = useState('');
   const [friendCode, setFriendCode] = useState('');
+  const [requestStatus, setRequestStatus] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   const [viewingFriend, setViewingFriend] = useState<FriendItem | null>(null);
   const [invitingFriend, setInvitingFriend] = useState<FriendItem | null>(null);
@@ -33,20 +42,29 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!friendCode.trim() && !friendUsername.trim()) return;
-    await onAddFriend({
-      username: friendUsername.trim() || undefined,
-      friendCode: friendCode.trim() || `MCMC-${Math.floor(1000 + Math.random() * 9000)}`,
-    });
-    setFriendUsername('');
-    setFriendCode('');
-    setIsAddModalOpen(false);
+    const cleaned = friendCode.trim().toUpperCase();
+    if (!cleaned) return;
+    setRequestError(null);
+    setRequestStatus(null);
+    try {
+      const req = await onSendFriendRequest(cleaned);
+      setFriendCode('');
+      setIsAddModalOpen(false);
+      setRequestStatus(
+        `Friend request sent to ${req.toUsername} (${req.toFriendCode}). They will appear in your friends list once they accept.`
+      );
+    } catch (err) {
+      setRequestError(err instanceof Error ? err.message : 'Failed to send friend request.');
+    }
   };
 
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!invitingFriend || !selectedModpackId) return;
-    await onInviteFriendToModpack(selectedModpackId, invitingFriend.username);
+    await onInviteFriendToModpack(
+      selectedModpackId,
+      invitingFriend.friendCode || invitingFriend.username
+    );
     setInviteMessage(
       `Invitation sent to ${invitingFriend.username}. They will be permanently added as a collaborator once they accept.`
     );
@@ -58,12 +76,85 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         <h1 className="text-lg font-bold text-white">Friends &amp; Invitations</h1>
         <button
           type="button"
-          onClick={() => setIsAddModalOpen(true)}
+          onClick={() => {
+            setRequestError(null);
+            setFriendCode('');
+            setIsAddModalOpen(true);
+          }}
           className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 text-xs font-bold text-white hover:bg-neutral-700"
         >
           + Add Friend
         </button>
       </div>
+
+      {requestStatus && (
+        <div className="border border-neutral-700 bg-neutral-900 p-3 text-xs text-white">
+          {requestStatus}
+        </div>
+      )}
+
+      {/* Incoming Friend Requests */}
+      {incomingFriendRequests.length > 0 && (
+        <div className="border border-neutral-700 bg-neutral-950 p-3 text-xs space-y-2">
+          <strong className="text-white block">Incoming Friend Requests</strong>
+          <div className="space-y-1.5">
+            {incomingFriendRequests.map((req) => (
+              <div
+                key={req.id}
+                className="flex flex-wrap items-center justify-between gap-2 border border-neutral-800 bg-neutral-900 p-2"
+              >
+                <div className="flex items-center gap-2.5">
+                  <img
+                    src={req.fromAvatarUrl || '/MCMC.png'}
+                    alt={req.fromUsername}
+                    className="h-8 w-8 border border-neutral-800 bg-neutral-950 object-contain"
+                  />
+                  <div>
+                    <span className="font-bold text-white">{req.fromUsername}</span>{' '}
+                    <span className="text-neutral-400">({req.fromFriendCode})</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void onAcceptFriendRequest(req.id)}
+                    className="border border-neutral-600 bg-neutral-800 px-2.5 py-1 font-bold text-white hover:bg-neutral-700"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onDeclineFriendRequest(req.id)}
+                    className="border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-neutral-400 hover:bg-neutral-900"
+                  >
+                    Decline
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Outgoing Pending Friend Requests */}
+      {outgoingFriendRequests.length > 0 && (
+        <div className="border border-neutral-800 bg-neutral-950 p-3 text-xs space-y-2">
+          <strong className="text-neutral-300 block">Sent Friend Requests (Pending)</strong>
+          <div className="space-y-1.5">
+            {outgoingFriendRequests.map((req) => (
+              <div
+                key={req.id}
+                className="flex items-center justify-between border border-neutral-800 bg-neutral-900/50 px-2.5 py-1.5"
+              >
+                <span className="text-neutral-300">
+                  {req.toUsername} <span className="text-neutral-500">({req.toFriendCode})</span>
+                </span>
+                <span className="text-neutral-500">Pending Acceptance</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Pending Modpack Invitations Section */}
       {invites.length > 0 && (
@@ -77,9 +168,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
               >
                 <div>
                   <span className="font-bold text-white">{inv.modpackTitle}</span>{' '}
-                  <span className="text-neutral-400">
-                    — Invited {inv.invitedUser} (by {inv.invitedBy})
-                  </span>
+                  <span className="text-neutral-400">— Invited by {inv.invitedBy}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {onAcceptInvite && (
@@ -140,12 +229,13 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                 </button>
                 <button
                   type="button"
+                  disabled={modpacks.length === 0}
                   onClick={() => {
                     setInvitingFriend(friend);
-                    setSelectedModpackId(modpacks[0]?.id || 'demo-modpack');
+                    setSelectedModpackId(modpacks[0]?.id || '');
                     setInviteMessage(null);
                   }}
-                  className="border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-neutral-200 hover:bg-neutral-800"
+                  className="border border-neutral-700 bg-neutral-900 px-2.5 py-1 text-neutral-200 hover:bg-neutral-800 disabled:opacity-40"
                 >
                   Invite to Modpack
                 </button>
@@ -162,12 +252,12 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
         </div>
       )}
 
-      {/* Add Friend Modal */}
+      {/* Send Friend Request Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md border border-neutral-700 bg-neutral-950 p-4 text-xs text-neutral-200 space-y-3">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
-              <strong className="text-sm text-white">Add Friend</strong>
+              <strong className="text-sm text-white">Send Friend Request</strong>
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
@@ -186,20 +276,18 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                   value={friendCode}
                   onChange={(e) => setFriendCode(e.target.value)}
                   placeholder="e.g. MCMC-4821"
-                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
+                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 font-mono text-white"
                 />
+                <p className="mt-1 text-[11px] text-neutral-500">
+                  Sends a friend request. Their username will appear once they accept.
+                </p>
               </div>
 
-              <div>
-                <label className="block text-neutral-400 mb-1">Username (Optional)</label>
-                <input
-                  type="text"
-                  value={friendUsername}
-                  onChange={(e) => setFriendUsername(e.target.value)}
-                  placeholder="Enter friend username..."
-                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
-                />
-              </div>
+              {requestError && (
+                <div className="border border-red-800 bg-red-950/60 p-2 text-red-200">
+                  {requestError}
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 border-t border-neutral-800 pt-3">
                 <button
@@ -213,7 +301,7 @@ export const FriendsView: React.FC<FriendsViewProps> = ({
                   type="submit"
                   className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white"
                 >
-                  Add Friend
+                  Send Friend Request
                 </button>
               </div>
             </form>

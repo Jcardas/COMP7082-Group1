@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { uploadImageFile } from '../services/api';
 import { COMMON_MC_VERSIONS, type FriendItem, type Modpack, type ModpackInvite } from '../types/consts';
 
 interface ModpackProjectsViewProps {
@@ -30,6 +31,8 @@ interface ModpackProjectsViewProps {
   onDeclineInvite?: (inviteId: string) => Promise<void>;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
   modpacks,
   friends,
@@ -48,19 +51,22 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
 
   // Create/Edit form state
   const [title, setTitle] = useState('');
-  const [mcVersion, setMcVersion] = useState<string>('1.20.1');
+  const [mcVersion, setMcVersion] = useState<string>('1.21.1');
   const [modLoader, setModLoader] = useState<Modpack['modLoader']>('forge');
   const [imageUrl, setImageUrl] = useState('/MCMC.png');
-  const [selectedInvites, setSelectedInvites] = useState<string[]>([]);
-  const [inviteInput, setInviteInput] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [selectedInviteCodes, setSelectedInviteCodes] = useState<string[]>([]);
+  const [inviteCodeInput, setInviteCodeInput] = useState('');
 
   const openCreateModal = () => {
     setTitle('');
-    setMcVersion('1.20.1');
+    setMcVersion('1.21.1');
     setModLoader('forge');
     setImageUrl('/MCMC.png');
-    setSelectedInvites([]);
-    setInviteInput('');
+    setUploadError(null);
+    setSelectedInviteCodes([]);
+    setInviteCodeInput('');
     setIsCreateOpen(true);
   };
 
@@ -69,8 +75,9 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
     setEditingPack(pack);
     setTitle(pack.title);
     setImageUrl(pack.imageUrl || '/MCMC.png');
-    setSelectedInvites(pack.pendingInvites || []);
-    setInviteInput('');
+    setUploadError(null);
+    setSelectedInviteCodes(pack.pendingInvites || []);
+    setInviteCodeInput('');
   };
 
   const handleDeleteClick = (id: string, e: React.MouseEvent) => {
@@ -78,28 +85,51 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
     void onDeleteModpack(id);
   };
 
-  const toggleFriendInvite = (username: string) => {
-    setSelectedInvites((prev) =>
-      prev.includes(username) ? prev.filter((u) => u !== username) : [...prev, username]
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError(null);
+    setIsUploadingImage(true);
+    try {
+      const uploadedUrl = await uploadImageFile(file);
+      setImageUrl(uploadedUrl);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to upload image');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const toggleFriendInvite = (friendCode: string) => {
+    const normalized = friendCode.trim().toUpperCase();
+    setSelectedInviteCodes((prev) =>
+      prev.includes(normalized) ? prev.filter((c) => c !== normalized) : [...prev, normalized]
     );
   };
 
-  const handleAddInviteInput = () => {
-    const trimmed = inviteInput.trim();
+  const handleAddInviteCode = () => {
+    const trimmed = inviteCodeInput.trim().toUpperCase();
     if (!trimmed) return;
-    if (!selectedInvites.includes(trimmed)) {
-      setSelectedInvites((prev) => [...prev, trimmed]);
+    if (!selectedInviteCodes.includes(trimmed)) {
+      setSelectedInviteCodes((prev) => [...prev, trimmed]);
     }
-    setInviteInput('');
+    setInviteCodeInput('');
+  };
+
+  const formatInviteDisplay = (codeOrLabel: string): string => {
+    const matchedFriend = friends.find(
+      (f) => f.friendCode.toUpperCase() === codeOrLabel.toUpperCase()
+    );
+    return matchedFriend ? `${matchedFriend.username} (${matchedFriend.friendCode})` : codeOrLabel;
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim() || isUploadingImage) return;
     const created = await onCreateModpack({
       title: title.trim(),
-      imageUrl: imageUrl.trim() || '/MCMC.png',
-      contributors: selectedInvites,
+      imageUrl: imageUrl || '/MCMC.png',
+      contributors: selectedInviteCodes,
       minecraftVersion: mcVersion,
       modLoader,
     });
@@ -109,15 +139,15 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
 
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingPack || !title.trim()) return;
+    if (!editingPack || !title.trim() || isUploadingImage) return;
     await onEditModpack(editingPack.id, {
       title: title.trim(),
-      imageUrl: imageUrl.trim() || '/MCMC.png',
-      pendingInvites: selectedInvites,
+      imageUrl: imageUrl || '/MCMC.png',
+      pendingInvites: selectedInviteCodes,
     });
     if (onInviteContributor) {
       const existingPending = editingPack.pendingInvites || [];
-      for (const invitee of selectedInvites) {
+      for (const invitee of selectedInviteCodes) {
         if (!existingPending.includes(invitee)) {
           await onInviteContributor(editingPack.id, invitee);
         }
@@ -127,6 +157,104 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
   };
 
   const activePack = modpacks.find((p) => p.id === activeModpackId);
+
+  const renderCollaboratorInviteSection = (isEdit = false) => (
+    <div className="space-y-2.5 border border-neutral-800 bg-neutral-900/40 p-3">
+      <div className="flex items-center justify-between">
+        <label className="font-bold text-neutral-200">Invite Collaborators</label>
+        <span className="text-[11px] text-neutral-400">Accepts invite before joining</span>
+      </div>
+
+      {/* Clean Friends List */}
+      <div className="space-y-1">
+        <span className="block text-[11px] text-neutral-400">From Your Friends</span>
+        {friends.length === 0 ? (
+          <p className="border border-neutral-800 bg-neutral-950 px-2.5 py-2 text-neutral-500">
+            No friends added yet. Use a friend code below to invite someone.
+          </p>
+        ) : (
+          <div className="max-h-32 overflow-y-auto border border-neutral-800 bg-neutral-950 divide-y divide-neutral-800">
+            {friends.map((f) => {
+              const isSelected = selectedInviteCodes.some(
+                (c) =>
+                  c.toUpperCase() === f.friendCode.toUpperCase() ||
+                  c.toLowerCase() === f.username.toLowerCase()
+              );
+              return (
+                <div
+                  key={f.id}
+                  className="flex items-center justify-between px-2.5 py-1.5"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-bold text-white truncate">{f.username}</span>
+                    <span className="font-mono text-[10px] text-neutral-500">
+                      {f.friendCode}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => toggleFriendInvite(f.friendCode)}
+                    className={`border px-2 py-0.5 text-[11px] ${
+                      isSelected
+                        ? 'border-neutral-400 bg-neutral-800 font-bold text-white'
+                        : 'border-neutral-700 bg-neutral-900 text-neutral-300 hover:bg-neutral-800'
+                    }`}
+                  >
+                    {isSelected ? 'Invited ✓' : '+ Invite'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Invite by Friend Code */}
+      <div className="space-y-1 pt-1">
+        <span className="block text-[11px] text-neutral-400">Invite by Friend Code</span>
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={inviteCodeInput}
+            onChange={(e) => setInviteCodeInput(e.target.value)}
+            placeholder="Enter friend code (e.g. MCMC-4821)..."
+            className="flex-1 border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 font-mono text-white"
+          />
+          <button
+            type="button"
+            onClick={handleAddInviteCode}
+            className="border border-neutral-700 bg-neutral-800 px-3 py-1.5 font-bold text-white hover:bg-neutral-700"
+          >
+            {isEdit ? 'Add Invite' : 'Invite'}
+          </button>
+        </div>
+      </div>
+
+      {/* Queued Invitations */}
+      {selectedInviteCodes.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {selectedInviteCodes.map((code) => (
+            <span
+              key={code}
+              className="inline-flex items-center gap-1.5 border border-neutral-700 bg-neutral-900 px-2 py-0.5 text-[11px] text-neutral-200"
+            >
+              <span>{formatInviteDisplay(code)}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedInviteCodes((prev) => prev.filter((item) => item !== code))
+                }
+                className="text-neutral-400 hover:text-white"
+                aria-label={`Remove ${code}`}
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-4">
@@ -156,7 +284,7 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
                 <div>
                   <span className="font-bold text-white">{inv.modpackTitle}</span>{' '}
                   <span className="text-neutral-400">
-                    — Invited {inv.invitedUser} by {inv.invitedBy}
+                    — Invited by {inv.invitedBy}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -187,55 +315,58 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
 
       {/* Grid of active modpack projects + Create New Modpack button as the last entry */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {modpacks.map((pack) => (
-          <div
-            key={pack.id}
-            onClick={() => onSelectModpack(pack)}
-            className="group relative flex cursor-pointer flex-col justify-between border border-neutral-800 bg-neutral-950 p-4 hover:border-neutral-600"
-          >
-            {/* Hover Edit and Delete buttons */}
-            <div className="invisible absolute right-2 top-2 flex gap-1 group-hover:visible">
-              <button
-                type="button"
-                onClick={(e) => openEditModal(pack, e)}
-                className="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={(e) => handleDeleteClick(pack.id, e)}
-                className="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                Delete
-              </button>
-            </div>
+        {modpacks.map((pack) => {
+          const cleanCollaborators = (pack.contributors || []).filter((c) => !UUID_REGEX.test(c));
+          return (
+            <div
+              key={pack.id}
+              onClick={() => onSelectModpack(pack)}
+              className="group relative flex cursor-pointer flex-col justify-between border border-neutral-800 bg-neutral-950 p-4 hover:border-neutral-600"
+            >
+              {/* Hover Edit and Delete buttons */}
+              <div className="invisible absolute right-2 top-2 flex gap-1 group-hover:visible">
+                <button
+                  type="button"
+                  onClick={(e) => openEditModal(pack, e)}
+                  className="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleDeleteClick(pack.id, e)}
+                  className="border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                >
+                  Delete
+                </button>
+              </div>
 
-            <div className="flex items-center gap-3">
-              <img
-                src={pack.imageUrl || '/MCMC.png'}
-                alt={pack.title}
-                className="h-12 w-12 border border-neutral-800 bg-neutral-900 object-contain"
-              />
-              <div>
-                <h2 className="font-bold text-white">{pack.title}</h2>
-                <p className="text-xs text-neutral-400">
-                  MC {pack.minecraftVersion} | {pack.modLoader.toUpperCase()}
-                </p>
+              <div className="flex items-center gap-3">
+                <img
+                  src={pack.imageUrl || '/MCMC.png'}
+                  alt={pack.title}
+                  className="h-12 w-12 border border-neutral-800 bg-neutral-900 object-contain"
+                />
+                <div>
+                  <h2 className="font-bold text-white">{pack.title}</h2>
+                  <p className="text-xs text-neutral-400">
+                    MC {pack.minecraftVersion} | {pack.modLoader.toUpperCase()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between border-t border-neutral-800 pt-2 text-xs text-neutral-400">
+                <span>{pack.mods.length} Mods</span>
+                <span>
+                  {cleanCollaborators.length} Collaborator{cleanCollaborators.length === 1 ? '' : 's'}
+                  {pack.pendingInvites && pack.pendingInvites.length > 0
+                    ? ` (${pack.pendingInvites.length} invited)`
+                    : ''}
+                </span>
               </div>
             </div>
-
-            <div className="mt-4 flex items-center justify-between border-t border-neutral-800 pt-2 text-xs text-neutral-400">
-              <span>{pack.mods.length} Mods</span>
-              <span>
-                {(pack.contributors || []).length} Collaborators
-                {pack.pendingInvites && pack.pendingInvites.length > 0
-                  ? ` (${pack.pendingInvites.length} invited)`
-                  : ''}
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Create New Modpack Button as the last entry in the grid */}
         <button
@@ -250,7 +381,7 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
       {/* Create Modpack Modal */}
       {isCreateOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md border border-neutral-700 bg-neutral-950 p-4 text-xs text-neutral-200">
+          <div className="w-full max-w-md border border-neutral-700 bg-neutral-950 p-4 text-xs text-neutral-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
               <strong className="text-sm text-white">Create New Modpack</strong>
               <button
@@ -306,63 +437,31 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
                 </div>
               </div>
 
+              {/* Modpack Image File Upload */}
               <div>
-                <label className="block text-neutral-400 mb-1">Modpack Picture URL</label>
-                <input
-                  type="text"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  placeholder="/MCMC.png or image URL"
-                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-neutral-400">
-                  Invite Collaborators (Sends Invitation to Join)
-                </label>
-                {friends.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {friends.map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => toggleFriendInvite(f.username)}
-                        className={`border px-2 py-1 ${
-                          selectedInvites.includes(f.username)
-                            ? 'border-neutral-400 bg-neutral-800 text-white'
-                            : 'border-neutral-800 bg-neutral-900 text-neutral-400'
-                        }`}
-                      >
-                        {f.username} ({f.friendCode})
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={inviteInput}
-                    onChange={(e) => setInviteInput(e.target.value)}
-                    placeholder="Friend username or friend code..."
-                    className="flex-1 border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
+                <label className="block text-neutral-400 mb-1">Modpack Picture</label>
+                <div className="flex items-center gap-3 border border-neutral-800 bg-neutral-900/50 p-2">
+                  <img
+                    src={imageUrl || '/MCMC.png'}
+                    alt="Modpack preview"
+                    className="h-12 w-12 shrink-0 border border-neutral-700 bg-neutral-900 object-contain"
                   />
-                  <button
-                    type="button"
-                    onClick={handleAddInviteInput}
-                    className="border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-white"
-                  >
-                    Invite
-                  </button>
+                  <div className="flex-1 space-y-1">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(e) => void handleImageFileChange(e)}
+                      className="block w-full text-[11px] text-neutral-300 file:mr-2 file:border file:border-neutral-700 file:bg-neutral-800 file:px-2.5 file:py-1 file:text-xs file:font-bold file:text-white hover:file:bg-neutral-700"
+                    />
+                    {isUploadingImage && (
+                      <p className="text-[11px] text-neutral-400">Uploading image...</p>
+                    )}
+                    {uploadError && <p className="text-[11px] text-red-400">{uploadError}</p>}
+                  </div>
                 </div>
-
-                {selectedInvites.length > 0 && (
-                  <p className="text-neutral-400">
-                    Pending Invites to Send: {selectedInvites.join(', ')}
-                  </p>
-                )}
               </div>
+
+              {renderCollaboratorInviteSection(false)}
 
               <div className="flex justify-end gap-2 border-t border-neutral-800 pt-3">
                 <button
@@ -374,7 +473,8 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white"
+                  disabled={isUploadingImage}
+                  className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white disabled:opacity-50"
                 >
                   Create Modpack
                 </button>
@@ -387,7 +487,7 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
       {/* Edit Modpack Modal */}
       {editingPack && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="w-full max-w-md border border-neutral-700 bg-neutral-950 p-4 text-xs text-neutral-200">
+          <div className="w-full max-w-md border border-neutral-700 bg-neutral-950 p-4 text-xs text-neutral-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-2">
               <strong className="text-sm text-white">Edit Modpack</strong>
               <button
@@ -411,60 +511,31 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
                 />
               </div>
 
+              {/* Modpack Image File Upload */}
               <div>
-                <label className="block text-neutral-400 mb-1">Modpack Picture URL</label>
-                <input
-                  type="text"
-                  value={imageUrl}
-                  onChange={(e) => setImageUrl(e.target.value)}
-                  className="w-full border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-neutral-400">
-                  Invite New Collaborators (Sends Invite)
-                </label>
-                {friends.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {friends.map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        onClick={() => toggleFriendInvite(f.username)}
-                        className={`border px-2 py-1 ${
-                          selectedInvites.includes(f.username)
-                            ? 'border-neutral-400 bg-neutral-800 text-white'
-                            : 'border-neutral-800 bg-neutral-900 text-neutral-400'
-                        }`}
-                      >
-                        {f.username}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={inviteInput}
-                    onChange={(e) => setInviteInput(e.target.value)}
-                    placeholder="Invite user by name or friend code..."
-                    className="flex-1 border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
+                <label className="block text-neutral-400 mb-1">Modpack Picture</label>
+                <div className="flex items-center gap-3 border border-neutral-800 bg-neutral-900/50 p-2">
+                  <img
+                    src={imageUrl || '/MCMC.png'}
+                    alt="Modpack preview"
+                    className="h-12 w-12 shrink-0 border border-neutral-700 bg-neutral-900 object-contain"
                   />
-                  <button
-                    type="button"
-                    onClick={handleAddInviteInput}
-                    className="border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-white"
-                  >
-                    Send Invite
-                  </button>
+                  <div className="flex-1 space-y-1">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(e) => void handleImageFileChange(e)}
+                      className="block w-full text-[11px] text-neutral-300 file:mr-2 file:border file:border-neutral-700 file:bg-neutral-800 file:px-2.5 file:py-1 file:text-xs file:font-bold file:text-white hover:file:bg-neutral-700"
+                    />
+                    {isUploadingImage && (
+                      <p className="text-[11px] text-neutral-400">Uploading image...</p>
+                    )}
+                    {uploadError && <p className="text-[11px] text-red-400">{uploadError}</p>}
+                  </div>
                 </div>
-
-                {selectedInvites.length > 0 && (
-                  <p className="text-neutral-400">Pending Invites: {selectedInvites.join(', ')}</p>
-                )}
               </div>
+
+              {renderCollaboratorInviteSection(true)}
 
               <div className="flex justify-end gap-2 border-t border-neutral-800 pt-3">
                 <button
@@ -476,7 +547,8 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white"
+                  disabled={isUploadingImage}
+                  className="border border-neutral-600 bg-neutral-800 px-3 py-1.5 font-bold text-white disabled:opacity-50"
                 >
                   Save Changes
                 </button>

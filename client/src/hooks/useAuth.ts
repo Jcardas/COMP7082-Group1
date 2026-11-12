@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { deleteAccountApi, syncUserToServer } from '../services/api';
 
 const DEFAULT_FALLBACK_USER = `Crafter_${Math.floor(100 + Math.random() * 900)}`;
 
@@ -19,7 +20,7 @@ export function useAuth() {
   const [localAuthenticated, setLocalAuthenticated] = useState<boolean>(false);
   const [customUsername, setCustomUsername] = useState<string>('');
   const [customEmail, setCustomEmail] = useState<string>('');
-  const [avatarUrl, setAvatarUrl] = useState<string>('/MCMC.png');
+  const [customAvatarUrl, setCustomAvatarUrl] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(() => Boolean(supabase));
 
   useEffect(() => {
@@ -63,6 +64,9 @@ export function useAuth() {
 
   const signOut = useCallback(async () => {
     setLocalAuthenticated(false);
+    setCustomUsername('');
+    setCustomEmail('');
+    setCustomAvatarUrl('');
     if (!supabase) return;
     const { error } = await supabase.auth.signOut();
     if (error) {
@@ -78,24 +82,49 @@ export function useAuth() {
     (user?.email ? user.email.split('@')[0] : null) ||
     DEFAULT_FALLBACK_USER;
 
+  const avatarUrl =
+    customAvatarUrl.trim() ||
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    '/MCMC.png';
+
   const userId = user?.id || displayName;
   const email = customEmail.trim() || user?.email || 'crafter@mcmc.local';
   const friendCode = computeFriendCode(userId);
+  const isAuthenticated = Boolean(user) || localAuthenticated;
+
+  useEffect(() => {
+    if (!isAuthenticated || !userId) return;
+    void syncUserToServer({
+      userId,
+      username: displayName,
+      friendCode,
+      avatarUrl,
+    });
+  }, [isAuthenticated, userId, displayName, friendCode, avatarUrl]);
 
   const updateProfile = useCallback(
     async (updates: { username?: string; avatarUrl?: string }) => {
+      const nextName = updates.username !== undefined ? updates.username : displayName;
+      const nextAvatar = updates.avatarUrl !== undefined ? updates.avatarUrl : avatarUrl;
       if (updates.username !== undefined) setCustomUsername(updates.username);
-      if (updates.avatarUrl !== undefined) setAvatarUrl(updates.avatarUrl);
+      if (updates.avatarUrl !== undefined) setCustomAvatarUrl(updates.avatarUrl);
       if (supabase && user) {
         await supabase.auth.updateUser({
           data: {
-            full_name: updates.username ?? displayName,
-            avatar_url: updates.avatarUrl ?? avatarUrl,
+            full_name: nextName,
+            avatar_url: nextAvatar,
           },
         });
       }
+      await syncUserToServer({
+        userId,
+        username: nextName,
+        friendCode,
+        avatarUrl: nextAvatar,
+      });
     },
-    [avatarUrl, displayName, user]
+    [avatarUrl, displayName, friendCode, user, userId]
   );
 
   const updateUserEmail = useCallback(
@@ -120,8 +149,13 @@ export function useAuth() {
   );
 
   const deleteAccount = useCallback(async () => {
+    try {
+      await deleteAccountApi(userId);
+    } catch (err) {
+      console.warn('[Auth] Server account deletion warning:', err);
+    }
     await signOut();
-  }, [signOut]);
+  }, [signOut, userId]);
 
   return {
     session,
@@ -131,7 +165,7 @@ export function useAuth() {
     email,
     avatarUrl,
     friendCode,
-    isAuthenticated: Boolean(user) || localAuthenticated,
+    isAuthenticated,
     isLoading,
     markAuthenticated,
     signOut,

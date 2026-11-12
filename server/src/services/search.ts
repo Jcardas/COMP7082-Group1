@@ -202,15 +202,16 @@ export function parseNLPQuery(rawQuery: string): {
 
   const cleanTokens = cleaned
     .split(/[^a-z0-9_-]+/)
-    .filter((t) => t.length > 2);
+    .filter((t) => t.length > 1);
 
   const matchedCategories: string[] = [];
   const targetedQueries: string[] = [];
 
   for (const concept of CONCEPT_MAPPINGS) {
-    const isTriggered = concept.triggers.some((trigger) =>
-      normalized.includes(trigger)
-    );
+    const isTriggered = concept.triggers.some((trigger) => {
+      const escaped = trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`\\b${escaped}\\b`, 'i').test(normalized);
+    });
 
     if (isTriggered) {
       if (!matchedCategories.includes(concept.category)) {
@@ -229,6 +230,113 @@ export function parseNLPQuery(rawQuery: string): {
     matchedCategories,
     targetedQueries,
   };
+}
+
+/**
+ * Computes a normalized [0, 1] name-matching score between a mod's title/slug and the user query.
+ */
+export function computeNameMatchScore(
+  modName: string,
+  modSlug: string | undefined,
+  rawQuery: string,
+  cleanKeywords: string[]
+): number {
+  const nameLower = (modName || '').toLowerCase().trim();
+  const slugLower = (modSlug || '').toLowerCase().trim();
+  const qLower = (rawQuery || '').toLowerCase().trim();
+  const cleanQ = cleanKeywords.join(' ').trim().toLowerCase();
+
+  if (!nameLower || (!qLower && !cleanQ)) return 0;
+
+  const normName = nameLower.replace(/[^a-z0-9]/g, '');
+  const normSlug = slugLower.replace(/[^a-z0-9]/g, '');
+  const normQ = (cleanQ || qLower).replace(/[^a-z0-9]/g, '');
+  const normRawQ = qLower.replace(/[^a-z0-9]/g, '');
+
+  // 1. Exact name or slug match
+  if (
+    nameLower === qLower ||
+    (cleanQ && nameLower === cleanQ) ||
+    slugLower === qLower ||
+    (cleanQ && slugLower === cleanQ) ||
+    (normQ && (normName === normQ || normSlug === normQ)) ||
+    (normRawQ && (normName === normRawQ || normSlug === normRawQ))
+  ) {
+    return 1.0;
+  }
+
+  // 2. Prefix match
+  if (
+    nameLower.startsWith(qLower) ||
+    (cleanQ && nameLower.startsWith(cleanQ)) ||
+    (normQ && normName.startsWith(normQ))
+  ) {
+    return 0.85;
+  }
+
+  // 3. Full phrase substring match in title
+  if (
+    nameLower.includes(qLower) ||
+    (cleanQ && nameLower.includes(cleanQ)) ||
+    (normQ.length >= 3 && normName.includes(normQ))
+  ) {
+    return 0.72;
+  }
+
+  // 4. Token-level overlap in name or slug
+  const tokens =
+    cleanKeywords.length > 0
+      ? cleanKeywords
+      : qLower.split(/[^a-z0-9_-]+/).filter((t) => t.length > 1);
+
+  if (tokens.length === 0) return 0;
+
+  let matchedCount = 0;
+  for (const token of tokens) {
+    if (nameLower.includes(token) || slugLower.includes(token)) {
+      matchedCount++;
+    }
+  }
+
+  return (matchedCount / tokens.length) * 0.6;
+}
+
+/**
+ * Ranks mod candidates heavily weighted toward name matching and download popularity,
+ * while still factoring in semantic similarity for conversational queries.
+ */
+export function rankSearchCandidates(
+  candidates: Array<{ mod: ModItem; similarity: number }>,
+  rawQuery: string,
+  cleanKeywords: string[],
+  useEmbeddings: boolean
+): ModItem[] {
+  if (candidates.length === 0) return [];
+
+  const maxDownloads = Math.max(...candidates.map((c) => c.mod.downloads || 0), 1000);
+  const denom = Math.log10(maxDownloads + 1);
+
+  const scored = candidates.map(({ mod, similarity }) => {
+    const dl = Math.max(mod.downloads || 0, 0);
+    const nameScore = computeNameMatchScore(mod.name, mod.slug, rawQuery, cleanKeywords);
+    const logPop = Math.log10(dl + 1) / denom;
+    const sqrtPop = Math.sqrt(dl / maxDownloads);
+    const popularityScore = logPop * 0.7 + sqrtPop * 0.3;
+
+    const summaryLower = (mod.summary || '').toLowerCase();
+    const tokens = cleanKeywords.length > 0 ? cleanKeywords : rawQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    const summaryHits = tokens.filter((t) => t.length > 1 && summaryLower.includes(t)).length;
+    const summaryBonus = tokens.length > 0 ? (summaryHits / tokens.length) * 0.02 : 0;
+
+    const score = useEmbeddings
+      ? nameScore * 0.48 + popularityScore * 0.38 + similarity * 0.12 + summaryBonus
+      : nameScore * 0.56 + popularityScore * 0.42 + summaryBonus;
+
+    return { mod, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.mod);
 }
 
 /**
@@ -263,6 +371,7 @@ async function cacheDiscoveredMods(mods: ModItem[]) {
             loaders: mod.loaders || [],
             game_versions: mod.gameVersions || [],
             icon_url: mod.iconUrl || null,
+            downloads: mod.downloads || 0,
             embedding,
           });
         }
@@ -377,6 +486,7 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
         for (const item of data) {
           if (item.source === 'modrinth' && !includeModrinth) continue;
           if (item.source === 'curseforge' && !includeCurseforge) continue;
+          const rawSim = item.semantic_similarity ?? item.similarity;
           const modItem: ModItem = {
             id: `${item.source}-${item.external_mod_id}`,
             source: item.source,
@@ -389,8 +499,8 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
               item.source === 'modrinth'
                 ? `https://modrinth.com/mod/${item.external_mod_id}`
                 : `https://www.curseforge.com/minecraft/mc-mods/${item.external_mod_id}`,
-            downloads: 0,
-            similarity: item.similarity ? parseFloat(item.similarity.toFixed(3)) : undefined,
+            downloads: Number(item.downloads) || 0,
+            similarity: rawSim !== undefined ? parseFloat(Number(rawSim).toFixed(3)) : undefined,
             categories: item.categories || [],
             loaders: item.loaders || [],
             gameVersions: item.game_versions || [],
@@ -408,45 +518,61 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
 
   const { cleanKeywords, matchedCategories, targetedQueries } = parseNLPQuery(query);
   const searchPromises: Promise<ModItem[]>[] = [];
+  const primaryQuery = cleanKeywords.join(' ') || query.trim();
 
   if (includeModrinth) {
+    // Direct relevance + popularity searches for the full cleaned query
+    searchPromises.push(
+      searchModrinthMods({
+        query: primaryQuery,
+        categories: activeCategories,
+        loader,
+        gameVersion,
+        index: 'relevance',
+        limit: 20,
+      })
+    );
+    searchPromises.push(
+      searchModrinthMods({
+        query: primaryQuery,
+        categories: activeCategories,
+        loader,
+        gameVersion,
+        index: 'downloads',
+        limit: 20,
+      })
+    );
+
     for (const token of cleanKeywords.slice(0, 3)) {
+      if (token === primaryQuery) continue;
       searchPromises.push(
         searchModrinthMods({
           query: token,
           categories: activeCategories,
           loader,
           gameVersion,
-          limit: 15,
-        })
-      );
-    }
-
-    if (cleanKeywords.length >= 2) {
-      searchPromises.push(
-        searchModrinthMods({
-          query: cleanKeywords.slice(0, 2).join(' '),
-          categories: activeCategories,
-          loader,
-          gameVersion,
-          limit: 15,
+          index: 'downloads',
+          limit: 12,
         })
       );
     }
 
     for (const targeted of targetedQueries.slice(0, 3)) {
+      if (targeted === primaryQuery) continue;
       searchPromises.push(
         searchModrinthMods({
           query: targeted,
           categories: activeCategories,
           loader,
           gameVersion,
+          index: 'downloads',
           limit: 10,
         })
       );
     }
 
-    const catsToUse = activeCategories || (matchedCategories.length > 0 ? matchedCategories.slice(0, 2) : undefined);
+    const catsToUse =
+      activeCategories || (matchedCategories.length > 0 ? matchedCategories.slice(0, 2) : undefined);
     if (catsToUse) {
       searchPromises.push(
         searchModrinthMods({
@@ -464,7 +590,7 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
   if (includeCurseforge) {
     searchPromises.push(
       searchCurseforgeMods({
-        query: cleanKeywords.slice(0, 2).join(' ') || query,
+        query: primaryQuery,
         loader,
         gameVersion,
         limit: 20,
@@ -475,8 +601,19 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
   const allResultSets = await Promise.all(searchPromises);
   for (const set of allResultSets) {
     for (const mod of set) {
-      if (!candidateMap.has(mod.id)) {
+      const existing = candidateMap.get(mod.id);
+      if (!existing) {
         candidateMap.set(mod.id, mod);
+      } else {
+        candidateMap.set(mod.id, {
+          ...existing,
+          slug: mod.slug || existing.slug,
+          iconUrl: mod.iconUrl || existing.iconUrl,
+          projectUrl: mod.projectUrl || existing.projectUrl,
+          downloads: Math.max(existing.downloads || 0, mod.downloads || 0),
+          loaders: mod.loaders?.length ? mod.loaders : existing.loaders,
+          gameVersions: mod.gameVersions?.length ? mod.gameVersions : existing.gameVersions,
+        });
       }
     }
   }
@@ -494,8 +631,7 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
   const start = (Math.max(1, page) - 1) * limit;
 
   if (queryEmbedding && allCandidates.length > 0) {
-    const scoredList: Array<{ mod: ModItem; score: number }> = [];
-    const maxDownloads = Math.max(...allCandidates.map((m) => m.downloads || 0), 1000);
+    const prepared: Array<{ mod: ModItem; similarity: number }> = [];
 
     for (const mod of allCandidates) {
       let similarity = mod.similarity;
@@ -525,14 +661,10 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
         }
       }
 
-      const popularityScore =
-        Math.log10(Math.max(mod.downloads || 0, 1) + 1) / Math.log10(maxDownloads + 1);
-      const compositeScore = similarity * 0.7 + popularityScore * 0.3;
-      scoredList.push({ mod, score: compositeScore });
+      prepared.push({ mod, similarity });
     }
 
-    scoredList.sort((a, b) => b.score - a.score);
-    const rankedAll = scoredList.map((s) => s.mod);
+    const rankedAll = rankSearchCandidates(prepared, query, cleanKeywords, true);
     cacheDiscoveredMods(rankedAll.slice(0, 10));
 
     return {
@@ -544,12 +676,17 @@ export async function searchModsWithNLP(params: NLPSearchParams): Promise<{
     };
   }
 
-  allCandidates.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+  const rankedFallback = rankSearchCandidates(
+    allCandidates.map((mod) => ({ mod, similarity: 0 })),
+    query,
+    cleanKeywords,
+    false
+  );
 
   return {
-    results: allCandidates.slice(start, start + limit),
+    results: rankedFallback.slice(start, start + limit),
     source: hasPgVectorResults ? 'pgvector' : 'api-fallback',
-    total: allCandidates.length,
+    total: rankedFallback.length,
     page: Math.max(1, page),
     pageSize: limit,
   };

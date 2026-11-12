@@ -47,3 +47,6 @@ coverage/
 *.zip
 temp/
 exports/
+.data/
+server/.data/
+server/uploads/

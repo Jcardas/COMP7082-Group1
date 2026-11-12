@@ -66,7 +66,7 @@ export const addModSchema = z
 
 /**
  * Schema for creating a new Modpack
- * Requires non-empty title, valid minecraftVersion, and valid modLoader
+ * Requires non-empty title, valid minecraftVersion (defaulting to 1.21.1), and valid modLoader
  */
 export const createModpackSchema = z.object({
   title: z
@@ -85,7 +85,8 @@ export const createModpackSchema = z.object({
   minecraftVersion: z
     .string()
     .trim()
-    .min(1, 'Minecraft version is required'),
+    .min(1, 'Minecraft version is required')
+    .default('1.21.1'),
   modLoader: modLoaderEnum.default('forge'),
   createdBy: z.string().trim().min(1).optional().default('Anonymous'),
   creatorName: z.string().trim().optional(),
@@ -116,15 +117,17 @@ export const updateModpackSchema = z.object({
     .optional(),
   modLoader: modLoaderEnum.optional(),
   mods: z.array(z.any()).optional(),
+  userId: z.string().trim().optional(),
 });
 
 /**
  * Schema for inviting a collaborator to a modpack
  */
 export const inviteCollaboratorSchema = z.object({
-  invitedUser: z.string().trim().min(1, 'Invited username or friend code is required'),
+  invitedUser: z.string().trim().min(1, 'Invited friend code or user is required'),
   invitedUserId: z.string().trim().optional(),
   invitedBy: z.string().trim().optional().default('Collaborator'),
+  invitedById: z.string().trim().optional(),
 });
 
 /**
@@ -223,14 +226,17 @@ export const exportModpackBodySchema = z.object({
 });
 
 /**
- * Schema for adding a Friend collaborator (POST /api/friends)
+ * Schema for sending a Friend request (POST /api/friends or POST /api/friends/requests)
  */
 export const addFriendSchema = z.object({
-  username: z
+  fromUserId: z.string().trim().min(1).optional(),
+  fromUsername: z.string().trim().optional(),
+  fromFriendCode: z.string().trim().optional(),
+  targetFriendCode: z
     .string()
     .trim()
-    .min(1, 'Username cannot be empty')
-    .max(50, 'Username cannot exceed 50 characters')
+    .min(3, 'Friend code must be at least 3 characters')
+    .max(20, 'Friend code cannot exceed 20 characters')
     .optional(),
   friendCode: z
     .string()
@@ -238,4 +244,26 @@ export const addFriendSchema = z.object({
     .min(3, 'Friend code must be at least 3 characters')
     .max(20, 'Friend code cannot exceed 20 characters')
     .optional(),
+  username: z.string().trim().max(50).optional(),
+});
+
+export const respondFriendRequestSchema = z.object({
+  userId: z.string().trim().optional(),
+});
+
+export const syncUserSchema = z.object({
+  userId: z.string().trim().min(1),
+  username: z.string().trim().min(1).max(80),
+  friendCode: z.string().trim().optional(),
+  avatarUrl: z.string().trim().optional(),
+});
+
+export const uploadImageSchema = z.object({
+  filename: z.string().trim().min(1).max(200),
+  mimeType: z.string().trim().min(1),
+  dataBase64: z.string().min(1),
+});
+
+export const deleteAccountSchema = z.object({
+  userId: z.string().trim().min(1),
 });

@@ -1,6 +1,7 @@
 import type {
   DependencyAnalysisResult,
   FriendItem,
+  FriendRequest,
   ModItem,
   Modpack,
   ModpackInvite,
@@ -16,6 +17,14 @@ export class ModpackNotFoundError extends Error {
   }
 }
 
+export class ModpackAccessError extends Error {
+  status = 403;
+  constructor(id: string) {
+    super(`You do not have access to modpack "${id}"`);
+    this.name = 'ModpackAccessError';
+  }
+}
+
 export interface SearchFilterOptions {
   query?: string;
   loader?: string;
@@ -24,6 +33,15 @@ export interface SearchFilterOptions {
   source?: 'both' | 'modrinth' | 'curseforge';
   page?: number;
   limit?: number;
+}
+
+async function parseErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = (await res.json()) as { error?: string; message?: string };
+    return data.error || data.message || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function checkServerHealth(): Promise<{
@@ -36,10 +54,64 @@ export async function checkServerHealth(): Promise<{
   return res.json();
 }
 
+export async function syncUserToServer(payload: {
+  userId: string;
+  username: string;
+  friendCode?: string;
+  avatarUrl?: string;
+}): Promise<void> {
+  try {
+    await fetch(`${BASE_URL}/users/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // Non-fatal sync
+  }
+}
+
+export async function deleteAccountApi(userId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/account`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to delete account'));
+  }
+}
+
+export async function uploadImageFile(file: File): Promise<string> {
+  const dataBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.readAsDataURL(file);
+  });
+
+  const res = await fetch(`${BASE_URL}/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filename: file.name,
+      mimeType: file.type || 'image/png',
+      dataBase64,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to upload image'));
+  }
+
+  const data = (await res.json()) as { url: string };
+  return data.url;
+}
+
 export async function searchMods(
   queryOrOptions: string | SearchFilterOptions,
   loader = 'forge',
-  version = '1.20.1'
+  version = '1.21.1'
 ): Promise<{
   results: ModItem[];
   source: string;
@@ -55,7 +127,7 @@ export async function searchMods(
   const params = new URLSearchParams({
     q: opts.query || '',
     loader: opts.loader || 'forge',
-    version: opts.version || '1.20.1',
+    version: opts.version || '1.21.1',
     category: opts.category || 'all',
     source: opts.source || 'both',
     page: String(opts.page || 1),
@@ -70,7 +142,7 @@ export async function searchMods(
 export async function resolveModDependencies(
   mod: ModItem,
   loader = 'forge',
-  gameVersion = '1.20.1'
+  gameVersion = '1.21.1'
 ): Promise<ModItem[]> {
   const res = await fetch(`${BASE_URL}/resolve-mod-dependencies`, {
     method: 'POST',
@@ -95,7 +167,7 @@ export async function analyzeDependencies(mods: ModItem[]): Promise<DependencyAn
 export async function getRecommendations(
   mods: ModItem[],
   loader = 'forge',
-  version = '1.20.1'
+  version = '1.21.1'
 ): Promise<ModItem[]> {
   const res = await fetch(`${BASE_URL}/recommendations`, {
     method: 'POST',
@@ -117,17 +189,32 @@ export async function exportModpackZip(modpack: Modpack, format = 'curseforge'):
   return res.blob();
 }
 
-export async function listModpacks(): Promise<Modpack[]> {
-  const res = await fetch(`${BASE_URL}/modpacks`);
+export async function listModpacks(userId?: string, username?: string): Promise<Modpack[]> {
+  const params = new URLSearchParams();
+  if (userId) params.set('userId', userId);
+  if (username) params.set('username', username);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(`${BASE_URL}/modpacks${query}`);
   if (!res.ok) throw new Error('Failed to list modpacks');
   const data = await res.json();
   return data.modpacks || [];
 }
 
-export async function getModpack(id: string): Promise<Modpack> {
-  const res = await fetch(`${BASE_URL}/modpacks/${id}`);
+export async function getModpack(
+  id: string,
+  userId?: string,
+  username?: string
+): Promise<Modpack> {
+  const params = new URLSearchParams();
+  if (userId) params.set('userId', userId);
+  if (username) params.set('username', username);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(`${BASE_URL}/modpacks/${id}${query}`);
   if (res.status === 404) {
     throw new ModpackNotFoundError(id);
+  }
+  if (res.status === 403) {
+    throw new ModpackAccessError(id);
   }
   if (!res.ok) throw new Error('Failed to fetch modpack');
   return res.json();
@@ -149,42 +236,61 @@ export async function createModpack(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to create modpack');
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to create modpack'));
   return res.json();
 }
 
-export async function updateModpack(id: string, payload: Partial<Modpack>): Promise<Modpack> {
+export async function updateModpack(
+  id: string,
+  payload: Partial<Modpack> & { userId?: string }
+): Promise<Modpack> {
   const res = await fetch(`${BASE_URL}/modpacks/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to update modpack');
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to update modpack'));
   return res.json();
 }
 
-export async function addModToPackApi(modpackId: string, mod: ModItem): Promise<ModItem> {
+export async function addModToPackApi(
+  modpackId: string,
+  mod: ModItem,
+  userId?: string
+): Promise<ModItem> {
   const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/mods`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(userId ? { 'x-user-id': userId } : {}),
+    },
     body: JSON.stringify(mod),
   });
   if (!res.ok) throw new Error('Failed to add mod to modpack');
   return res.json();
 }
 
-export async function removeModFromPackApi(modpackId: string, modId: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/mods/${encodeURIComponent(modId)}`, {
-    method: 'DELETE',
-  });
+export async function removeModFromPackApi(
+  modpackId: string,
+  modId: string,
+  userId?: string
+): Promise<void> {
+  const res = await fetch(
+    `${BASE_URL}/modpacks/${modpackId}/mods/${encodeURIComponent(modId)}`,
+    {
+      method: 'DELETE',
+      headers: userId ? { 'x-user-id': userId } : undefined,
+    }
+  );
   if (!res.ok) throw new Error('Failed to remove mod from modpack');
 }
 
-export async function deleteModpack(id: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/modpacks/${id}`, {
+export async function deleteModpack(id: string, userId?: string): Promise<void> {
+  const query = userId ? `?userId=${encodeURIComponent(userId)}` : '';
+  const res = await fetch(`${BASE_URL}/modpacks/${id}${query}`, {
     method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Failed to delete modpack');
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to delete modpack'));
 }
 
 export async function sendModpackInvite(
@@ -193,6 +299,7 @@ export async function sendModpackInvite(
     invitedUser: string;
     invitedUserId?: string;
     invitedBy?: string;
+    invitedById?: string;
   }
 ): Promise<ModpackInvite> {
   const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/invites`, {
@@ -200,7 +307,7 @@ export async function sendModpackInvite(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to send modpack invite');
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to send modpack invite'));
   return res.json();
 }
 
@@ -246,23 +353,68 @@ export async function declineModpackInvite(
   return res.json();
 }
 
-export async function listFriends(): Promise<FriendItem[]> {
-  const res = await fetch(`${BASE_URL}/friends`);
+export async function listFriends(userId?: string): Promise<FriendItem[]> {
+  if (!userId) return [];
+  const res = await fetch(`${BASE_URL}/friends?userId=${encodeURIComponent(userId)}`);
   if (!res.ok) return [];
   const data = await res.json();
   return data.friends || [];
 }
 
-export async function addFriend(payload: {
-  username?: string;
-  friendCode: string;
-}): Promise<FriendItem> {
-  const res = await fetch(`${BASE_URL}/friends`, {
+export async function listFriendRequests(userId?: string): Promise<{
+  incoming: FriendRequest[];
+  outgoing: FriendRequest[];
+}> {
+  if (!userId) return { incoming: [], outgoing: [] };
+  const res = await fetch(`${BASE_URL}/friend-requests?userId=${encodeURIComponent(userId)}`);
+  if (!res.ok) return { incoming: [], outgoing: [] };
+  return res.json();
+}
+
+export async function sendFriendRequest(payload: {
+  fromUserId: string;
+  fromUsername: string;
+  fromFriendCode: string;
+  targetFriendCode: string;
+}): Promise<FriendRequest> {
+  const res = await fetch(`${BASE_URL}/friends/requests`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to add friend');
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to send friend request'));
+  }
+  return res.json();
+}
+
+export async function acceptFriendRequest(
+  requestId: string,
+  userId: string
+): Promise<{ request: FriendRequest; friend: FriendItem }> {
+  const res = await fetch(`${BASE_URL}/friend-requests/${requestId}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to accept friend request'));
+  }
+  return res.json();
+}
+
+export async function declineFriendRequest(
+  requestId: string,
+  userId: string
+): Promise<{ request: FriendRequest }> {
+  const res = await fetch(`${BASE_URL}/friend-requests/${requestId}/decline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res, 'Failed to decline friend request'));
+  }
   return res.json();
 }
 

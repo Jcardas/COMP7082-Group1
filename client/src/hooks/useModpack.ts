@@ -1,27 +1,38 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  acceptFriendRequest as apiAcceptFriendRequest,
   acceptModpackInvite as apiAcceptInvite,
-  addFriend as apiAddFriend,
   addModToPackApi,
   createModpack as apiCreateModpack,
+  declineFriendRequest as apiDeclineFriendRequest,
   declineModpackInvite as apiDeclineInvite,
   deleteModpack as apiDeleteModpack,
   getModpack,
   getRecommendations,
+  listFriendRequests,
   listFriends,
   listModpackInvites,
   listModpacks,
+  ModpackAccessError,
   ModpackNotFoundError,
   removeFriend as apiRemoveFriend,
   removeModFromPackApi,
   resolveModDependencies,
   searchMods,
   type SearchFilterOptions,
+  sendFriendRequest as apiSendFriendRequest,
   sendModpackInvite,
   updateModpack as apiUpdateModpack,
 } from '../services/api';
 import { socket } from '../services/socket';
-import type { FriendItem, ModComment, ModItem, Modpack, ModpackInvite } from '../types/consts';
+import type {
+  FriendItem,
+  FriendRequest,
+  ModComment,
+  ModItem,
+  Modpack,
+  ModpackInvite,
+} from '../types/consts';
 
 const INITIAL_TIMESTAMP = '2026-01-01T00:00:00.000Z';
 
@@ -49,24 +60,28 @@ function toggleUserVote(votes: { yes: string[]; no: string[] }, user: string, vo
 }
 
 export function useModpack(
-  modpackId = 'demo-modpack',
+  modpackId = '',
   currentUser = 'Crafter',
-  currentUserId = 'Anonymous',
+  currentUserId = '',
   currentFriendCode = ''
 ) {
   const [modpacks, setModpacks] = useState<Modpack[]>([]);
+  const [modpacksLoaded, setModpacksLoaded] = useState<boolean>(false);
   const [friends, setFriends] = useState<FriendItem[]>([]);
+  const [incomingFriendRequests, setIncomingFriendRequests] = useState<FriendRequest[]>([]);
+  const [outgoingFriendRequests, setOutgoingFriendRequests] = useState<FriendRequest[]>([]);
   const [invites, setInvites] = useState<ModpackInvite[]>([]);
   const [notFoundModpackId, setNotFoundModpackId] = useState<string | null>(null);
+  const [accessDeniedModpackId, setAccessDeniedModpackId] = useState<string | null>(null);
 
   const [modpack, setModpack] = useState<Modpack>(() => ({
     id: modpackId,
-    title: 'Group 1 Collaborative Pack',
+    title: 'New Modpack',
     description: 'Collaborative Minecraft modpack workspace',
     imageUrl: '/MCMC.png',
-    contributors: ['Alex', 'Steve'],
+    contributors: [],
     pendingInvites: [],
-    minecraftVersion: '1.20.1',
+    minecraftVersion: '1.21.1',
     modLoader: 'forge',
     mods: [],
     createdAt: INITIAL_TIMESTAMP,
@@ -74,7 +89,7 @@ export function useModpack(
   }));
 
   const [selectedLoader, setSelectedLoader] = useState<string>('forge');
-  const [selectedVersion, setSelectedVersion] = useState<string>('1.20.1');
+  const [selectedVersion, setSelectedVersion] = useState<string>('1.21.1');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSource, setSelectedSource] = useState<'both' | 'modrinth' | 'curseforge'>('both');
   const [searchPage, setSearchPage] = useState<number>(1);
@@ -150,46 +165,111 @@ export function useModpack(
   }, [modpack.minecraftVersion, modpack.modLoader, modpack.mods]);
 
   const refreshInvites = useCallback(async () => {
+    if (!currentUserId && !currentFriendCode && !currentUser) return;
     try {
-      const list = await listModpackInvites();
+      const list = await listModpackInvites({
+        user: currentUser,
+        friendCode: currentFriendCode,
+        userId: currentUserId,
+      });
       setInvites(list);
     } catch (err) {
       console.warn('Could not fetch invites:', err);
     }
-  }, []);
+  }, [currentFriendCode, currentUser, currentUserId]);
 
-  // Initial load of modpacks list, friends, invites, active modpack metadata, and starter search
+  const refreshSocialAndPacks = useCallback(async () => {
+    if (!currentUserId) return;
+    try {
+      const [packs, friendsList, reqs, inviteList] = await Promise.all([
+        listModpacks(currentUserId, currentUser),
+        listFriends(currentUserId),
+        listFriendRequests(currentUserId),
+        listModpackInvites({
+          user: currentUser,
+          friendCode: currentFriendCode,
+          userId: currentUserId,
+        }),
+      ]);
+      setModpacks(packs);
+      setModpacksLoaded(true);
+      setFriends(friendsList);
+      setIncomingFriendRequests(reqs.incoming || []);
+      setOutgoingFriendRequests(reqs.outgoing || []);
+      setInvites(inviteList);
+    } catch (err) {
+      console.warn('Background refresh warning:', err);
+    }
+  }, [currentFriendCode, currentUser, currentUserId]);
+
+  // Initial load of user-scoped modpacks, friends, friend requests, invites, active modpack, and starter search
   useEffect(() => {
     let isMounted = true;
 
-    listModpacks()
-      .then((packs) => {
-        if (isMounted) setModpacks(packs);
-      })
-      .catch((err) => console.warn('Could not list modpacks:', err));
+    if (!currentUserId) {
+      return () => {
+        isMounted = false;
+      };
+    }
 
-    listFriends()
+    listModpacks(currentUserId, currentUser)
+      .then((packs) => {
+        if (isMounted) {
+          setModpacks(packs);
+          setModpacksLoaded(true);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not list modpacks:', err);
+        if (isMounted) setModpacksLoaded(true);
+      });
+
+    listFriends(currentUserId)
       .then((list) => {
         if (isMounted) setFriends(list);
       })
       .catch((err) => console.warn('Could not list friends:', err));
 
-    listModpackInvites()
+    listFriendRequests(currentUserId)
+      .then((reqs) => {
+        if (isMounted) {
+          setIncomingFriendRequests(reqs.incoming || []);
+          setOutgoingFriendRequests(reqs.outgoing || []);
+        }
+      })
+      .catch((err) => console.warn('Could not list friend requests:', err));
+
+    listModpackInvites({
+      user: currentUser,
+      friendCode: currentFriendCode,
+      userId: currentUserId,
+    })
       .then((list) => {
         if (isMounted) setInvites(list);
       })
       .catch((err) => console.warn('Could not list invites:', err));
 
     if (!modpackId) {
+      searchMods({ query: '', loader: 'forge', version: '1.21.1', page: 1, limit: 10 })
+        .then((searchData) => {
+          if (isMounted) {
+            setSearchResults(searchData.results);
+            setSearchSource(searchData.source);
+            setSearchTotal(searchData.total ?? searchData.results.length);
+          }
+        })
+        .catch((searchErr) => console.error('Initial search error:', searchErr));
+
       return () => {
         isMounted = false;
       };
     }
 
-    getModpack(modpackId)
+    getModpack(modpackId, currentUserId, currentUser)
       .then((pack) => {
         if (!isMounted || !pack) return;
         setNotFoundModpackId(null);
+        setAccessDeniedModpackId(null);
         setModpack(pack);
         setSelectedLoader(pack.modLoader);
         setSelectedVersion(pack.minecraftVersion);
@@ -212,12 +292,16 @@ export function useModpack(
       })
       .catch((err) => {
         if (!isMounted) return;
-        if (err instanceof ModpackNotFoundError && modpackId !== 'demo-modpack') {
+        if (err instanceof ModpackNotFoundError) {
           setNotFoundModpackId(modpackId);
           return;
         }
+        if (err instanceof ModpackAccessError) {
+          setAccessDeniedModpackId(modpackId);
+          return;
+        }
         console.warn('Could not fetch modpack from server, loading default starter search:', err);
-        searchMods({ query: '', loader: 'forge', version: '1.20.1', page: 1, limit: 10 })
+        searchMods({ query: '', loader: 'forge', version: '1.21.1', page: 1, limit: 10 })
           .then((searchData) => {
             if (isMounted) {
               setSearchResults(searchData.results);
@@ -232,6 +316,15 @@ export function useModpack(
       isMounted = false;
     };
   }, [modpackId, currentUser, currentUserId, currentFriendCode]);
+
+  // Periodic polling to sync incoming friend requests, accepted friends, and modpack invites
+  useEffect(() => {
+    if (!currentUserId) return;
+    const interval = setInterval(() => {
+      void refreshSocialAndPacks();
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [currentUserId, refreshSocialAndPacks]);
 
   // Synchronize recommendations dynamically whenever active modpack mods change
   useEffect(() => {
@@ -298,21 +391,19 @@ export function useModpack(
         prev.map((p) => (p.id === targetModpackId ? { ...p, mods: mergeMods(p.mods) } : p))
       );
 
-      // Persist each added mod directly to Supabase `modpack_mods` via POST /api/modpacks/:id/mods
-      // as well as full mod list sync via PATCH /api/modpacks/:id
       for (const item of allToAdd) {
-        addModToPackApi(targetModpackId, item).catch(() => {});
+        addModToPackApi(targetModpackId, item, currentUserId).catch(() => {});
         socket.emit('mod_add', {
           modpackId: targetModpackId,
           mod: item,
           user,
         });
       }
-      apiUpdateModpack(targetModpackId, { mods: updatedMods }).catch(() => {});
+      apiUpdateModpack(targetModpackId, { mods: updatedMods, userId: currentUserId }).catch(() => {});
 
       return { addedDeps: requiredDeps };
     },
-    [currentUser, modpack, modpacks]
+    [currentUser, currentUserId, modpack, modpacks]
   );
 
   const addMod = useCallback(
@@ -326,8 +417,8 @@ export function useModpack(
     (modId: string, user = currentUser) => {
       setModpack((prev) => {
         const nextMods = prev.mods.filter((m) => m.id !== modId);
-        removeModFromPackApi(prev.id, modId).catch(() => {});
-        apiUpdateModpack(prev.id, { mods: nextMods }).catch(() => {});
+        removeModFromPackApi(prev.id, modId, currentUserId).catch(() => {});
+        apiUpdateModpack(prev.id, { mods: nextMods, userId: currentUserId }).catch(() => {});
         return {
           ...prev,
           mods: nextMods,
@@ -346,7 +437,7 @@ export function useModpack(
         user,
       });
     },
-    [currentUser, modpack.id]
+    [currentUser, currentUserId, modpack.id]
   );
 
   const voteMod = useCallback(
@@ -399,7 +490,7 @@ export function useModpack(
     [currentUser, modpack.id]
   );
 
-  // Modpack Project CRUD (tracks authenticated user ID in created_by and sends pending invites)
+  // Modpack Project CRUD
   const createNewModpack = useCallback(
     async (payload: {
       title: string;
@@ -414,7 +505,7 @@ export function useModpack(
         description: payload.description,
         imageUrl: payload.imageUrl,
         pendingInvites: payload.contributors || [],
-        minecraftVersion: payload.minecraftVersion,
+        minecraftVersion: payload.minecraftVersion || '1.21.1',
         modLoader: payload.modLoader,
         createdBy: currentUserId || currentUser,
         creatorName: currentUser,
@@ -436,22 +527,24 @@ export function useModpack(
         pendingInvites?: string[];
       }
     ) => {
-      const updated = await apiUpdateModpack(id, payload);
+      const updated = await apiUpdateModpack(id, { ...payload, userId: currentUserId });
       setModpacks((prev) => prev.map((p) => (p.id === id ? { ...p, ...updated } : p)));
       if (modpack.id === id) {
         setModpack((prev) => ({ ...prev, ...updated }));
       }
       return updated;
     },
-    [modpack.id]
+    [currentUserId, modpack.id]
   );
 
-  const deleteModpackProject = useCallback(async (id: string) => {
-    await apiDeleteModpack(id);
-    setModpacks((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+  const deleteModpackProject = useCallback(
+    async (id: string) => {
+      await apiDeleteModpack(id, currentUserId);
+      setModpacks((prev) => prev.filter((p) => p.id !== id));
+    },
+    [currentUserId]
+  );
 
-  // Inviting a collaborator sends a pending invite rather than immediately adding them to the pack
   const inviteContributor = useCallback(
     async (targetPackId: string, usernameOrCode: string) => {
       const cleaned = usernameOrCode.trim();
@@ -460,36 +553,35 @@ export function useModpack(
       const createdInvite = await sendModpackInvite(targetPackId, {
         invitedUser: cleaned,
         invitedBy: currentUser,
+        invitedById: currentUserId,
       });
 
-      setInvites((prev) => {
-        if (prev.some((inv) => inv.id === createdInvite.id)) return prev;
-        return [...prev, createdInvite];
-      });
+      const inviteLabel = createdInvite.invitedUser || cleaned;
 
       setModpacks((prev) =>
         prev.map((p) => {
           if (p.id !== targetPackId) return p;
           const pending = p.pendingInvites || [];
-          return pending.includes(cleaned)
+          return pending.includes(inviteLabel)
             ? p
-            : { ...p, pendingInvites: [...pending, cleaned] };
+            : { ...p, pendingInvites: [...pending, inviteLabel] };
         })
       );
 
       if (modpack.id === targetPackId) {
         setModpack((prev) => {
           const pending = prev.pendingInvites || [];
-          return pending.includes(cleaned)
+          return pending.includes(inviteLabel)
             ? prev
-            : { ...prev, pendingInvites: [...pending, cleaned] };
+            : { ...prev, pendingInvites: [...pending, inviteLabel] };
         });
       }
+
+      void refreshInvites();
     },
-    [currentUser, modpack.id]
+    [currentUser, currentUserId, modpack.id, refreshInvites]
   );
 
-  // Accepting an invite permanently adds the user to the modpack as a collaborator
   const acceptInvite = useCallback(
     async (inviteId: string) => {
       const { invite, modpack: updatedPack } = await apiAcceptInvite(inviteId, {
@@ -499,38 +591,22 @@ export function useModpack(
 
       setInvites((prev) => prev.filter((inv) => inv.id !== inviteId));
 
-      const acceptedUser = invite.invitedUser || currentUser;
-
-      setModpacks((prev) =>
-        prev.map((p) => {
-          if (p.id !== invite.modpackId) return p;
-          if (updatedPack) return { ...p, ...updatedPack };
-          const existing = p.contributors || [];
-          const nextContributors = existing.includes(acceptedUser)
-            ? existing
-            : [...existing, acceptedUser];
-          const nextPending = (p.pendingInvites || []).filter(
-            (u) => u.toLowerCase() !== invite.invitedUser.toLowerCase()
-          );
-          return { ...p, contributors: nextContributors, pendingInvites: nextPending };
-        })
-      );
-
-      if (modpack.id === invite.modpackId) {
-        setModpack((prev) => {
-          if (updatedPack) return { ...prev, ...updatedPack };
-          const existing = prev.contributors || [];
-          const nextContributors = existing.includes(acceptedUser)
-            ? existing
-            : [...existing, acceptedUser];
-          const nextPending = (prev.pendingInvites || []).filter(
-            (u) => u.toLowerCase() !== invite.invitedUser.toLowerCase()
-          );
-          return { ...prev, contributors: nextContributors, pendingInvites: nextPending };
+      if (updatedPack) {
+        setModpacks((prev) => {
+          const exists = prev.some((p) => p.id === updatedPack.id);
+          return exists
+            ? prev.map((p) => (p.id === updatedPack.id ? { ...p, ...updatedPack } : p))
+            : [updatedPack, ...prev];
         });
+      } else {
+        void refreshSocialAndPacks();
+      }
+
+      if (modpack.id === invite.modpackId && updatedPack) {
+        setModpack((prev) => ({ ...prev, ...updatedPack }));
       }
     },
-    [currentUser, currentUserId, modpack.id]
+    [currentUser, currentUserId, modpack.id, refreshSocialAndPacks]
   );
 
   const declineInvite = useCallback(
@@ -566,12 +642,41 @@ export function useModpack(
     [currentUser, currentUserId, modpack.id]
   );
 
-  // Friends CRUD
-  const createFriend = useCallback(async (payload: { username?: string; friendCode: string }) => {
-    const added = await apiAddFriend(payload);
-    setFriends((prev) => [...prev, added]);
-    return added;
-  }, []);
+  // Friend Requests & Friends CRUD
+  const sendFriendRequestAction = useCallback(
+    async (targetFriendCode: string) => {
+      const req = await apiSendFriendRequest({
+        fromUserId: currentUserId,
+        fromUsername: currentUser,
+        fromFriendCode: currentFriendCode,
+        targetFriendCode: targetFriendCode.trim().toUpperCase(),
+      });
+      setOutgoingFriendRequests((prev) => [...prev, req]);
+      return req;
+    },
+    [currentFriendCode, currentUser, currentUserId]
+  );
+
+  const acceptFriendRequestAction = useCallback(
+    async (requestId: string) => {
+      const { friend } = await apiAcceptFriendRequest(requestId, currentUserId);
+      setIncomingFriendRequests((prev) => prev.filter((r) => r.id !== requestId));
+      setFriends((prev) => {
+        if (prev.some((f) => f.id === friend.id || f.userId === friend.userId)) return prev;
+        return [...prev, friend];
+      });
+      return friend;
+    },
+    [currentUserId]
+  );
+
+  const declineFriendRequestAction = useCallback(
+    async (requestId: string) => {
+      await apiDeclineFriendRequest(requestId, currentUserId);
+      setIncomingFriendRequests((prev) => prev.filter((r) => r.id !== requestId));
+    },
+    [currentUserId]
+  );
 
   const deleteFriend = useCallback(async (id: string) => {
     await apiRemoveFriend(id);
@@ -642,15 +747,22 @@ export function useModpack(
 
   const installedModIds = new Set(modpack.mods.map((m) => m.id));
   const isNotFound = notFoundModpackId === modpackId;
+  const isAccessDenied = accessDeniedModpackId === modpackId;
 
   return {
-    modpacks,
+    modpacks: currentUserId ? modpacks : [],
+    modpacksLoaded: currentUserId ? modpacksLoaded : false,
     modpack,
     setModpack,
     isNotFound,
-    friends,
-    invites,
-    createFriend,
+    isAccessDenied,
+    friends: currentUserId ? friends : [],
+    incomingFriendRequests: currentUserId ? incomingFriendRequests : [],
+    outgoingFriendRequests: currentUserId ? outgoingFriendRequests : [],
+    invites: currentUserId ? invites : [],
+    sendFriendRequest: sendFriendRequestAction,
+    acceptFriendRequest: acceptFriendRequestAction,
+    declineFriendRequest: declineFriendRequestAction,
     deleteFriend,
     createNewModpack,
     editModpackProject,

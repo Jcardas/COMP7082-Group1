@@ -23,7 +23,7 @@ export const ModpackWorkspaceRoute: React.FC<ModpackWorkspaceRouteProps> = ({
 }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const resolvedId = id || 'demo-modpack';
+  const resolvedId = id || '';
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   const pack = useModpack(resolvedId, currentUser, currentUserId, currentFriendCode);
@@ -36,12 +36,20 @@ export const ModpackWorkspaceRoute: React.FC<ModpackWorkspaceRouteProps> = ({
   useDependencyAnalysis(pack.modpack.mods);
 
   useEffect(() => {
-    if (!pack.isNotFound && pack.modpack.id) {
+    if (!pack.isNotFound && !pack.isAccessDenied && pack.modpack.id && pack.modpack.id === resolvedId) {
       onActiveModpackChange?.(pack.modpack.id, pack.modpack.title);
     }
-  }, [onActiveModpackChange, pack.isNotFound, pack.modpack.id, pack.modpack.title]);
+  }, [onActiveModpackChange, pack.isAccessDenied, pack.isNotFound, pack.modpack.id, pack.modpack.title, resolvedId]);
 
-  if (pack.isNotFound) {
+  if (pack.isAccessDenied) {
+    return (
+      <NotFoundView
+        message="You do not have access to this modpack. Only the owner and accepted collaborators can view or edit it."
+      />
+    );
+  }
+
+  if (pack.isNotFound || !resolvedId) {
     return <NotFoundView modpackId={resolvedId} />;
   }
 

@@ -13,6 +13,8 @@ interface CollaborationSidebarProps {
   onDeclineInvite?: (inviteId: string) => void;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
   currentUser,
   contributors,
@@ -28,13 +30,14 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
   const [friendCodeInput, setFriendCodeInput] = useState('');
   const [inviteStatusMessage, setInviteStatusMessage] = useState<string | null>(null);
 
-  const acceptedContributors = Array.from(new Set([currentUser, ...contributors]));
+  const sanitizedContributors = contributors.filter((c) => c && !UUID_REGEX.test(c));
+  const acceptedContributors = Array.from(new Set([currentUser, ...sanitizedContributors]));
   const onlineNames = new Set(activeUsers.map((u) => u.username));
 
   const handleInviteByCode = (e: React.FormEvent) => {
     e.preventDefault();
     if (!friendCodeInput.trim()) return;
-    const target = friendCodeInput.trim();
+    const target = friendCodeInput.trim().toUpperCase();
     onInviteContributor(target);
     setFriendCodeInput('');
     setInviteStatusMessage(`Invitation sent to ${target}. Waiting for them to accept.`);
@@ -158,8 +161,14 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
               ) : (
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {friends.map((friend) => {
-                    const alreadyJoined = acceptedContributors.includes(friend.username);
-                    const alreadyInvited = pendingInvites.includes(friend.username);
+                    const alreadyJoined = acceptedContributors.some(
+                      (c) => c.toLowerCase() === friend.username.toLowerCase()
+                    );
+                    const alreadyInvited = pendingInvites.some(
+                      (p) =>
+                        p.toLowerCase() === friend.username.toLowerCase() ||
+                        p.toUpperCase() === friend.friendCode.toUpperCase()
+                    );
                     return (
                       <div
                         key={friend.id}
@@ -173,7 +182,7 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
                           type="button"
                           disabled={alreadyJoined || alreadyInvited}
                           onClick={() => {
-                            onInviteContributor(friend.username);
+                            onInviteContributor(friend.friendCode || friend.username);
                             setInviteStatusMessage(
                               `Invitation sent to ${friend.username}. They will be added once they accept.`
                             );
@@ -205,7 +214,7 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
                   value={friendCodeInput}
                   onChange={(e) => setFriendCodeInput(e.target.value)}
                   placeholder="Enter Friend Code (e.g. MCMC-4821)..."
-                  className="flex-1 border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-white"
+                  className="flex-1 border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 font-mono text-white"
                 />
                 <button
                   type="submit"
