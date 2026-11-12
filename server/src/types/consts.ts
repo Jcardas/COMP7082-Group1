@@ -1,0 +1,149 @@
+// This file defines various type structures for use in the codebase
+// Its like a CONST file.
+//
+// Reviewed by: Justin C
+
+export type ModSource = 'modrinth' | 'curseforge';
+
+export interface ModDependency {
+  id: string;
+  name: string;
+  source: ModSource;
+  dependencyType: 'required' | 'optional' | 'incompatible' | 'embedded';
+}
+
+// Stores information to do with a mod comment
+export interface ModComment {
+  id: string; // Unique comment ID
+  user: string; // Who is commenting
+  text: string; // The content of the comment
+  createdAt: string; // When it was created.
+}
+
+export interface ModVotes {
+  yes: string[]; // List of usernames who voted yes
+  no: string[];  // List of usernames who voted no
+}
+
+// Stores information about a mod or modpack.
+export interface ModItem {
+  id: string;
+  source: ModSource;
+  externalModId: string;
+  slug?: string;
+  name: string;
+  summary: string;
+  iconUrl?: string;
+  versionId?: string;
+  versionName?: string;
+  downloadUrl?: string;
+  projectUrl?: string;
+  downloads?: number;
+  similarity?: number;
+  filename?: string;
+  dependencies: ModDependency[];
+  categories: string[];
+  loaders: string[];
+  gameVersions: string[];
+  addedBy?: string;
+  votes?: ModVotes;
+  comments?: ModComment[];
+  createdAt?: string;
+}
+
+export interface ModpackInvite {
+  id: string;
+  modpackId: string;
+  modpackTitle: string;
+  invitedUser: string;
+  invitedUserId?: string;
+  invitedBy: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
+export interface Modpack {
+  id: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  createdBy?: string;
+  contributors?: string[];
+  pendingInvites?: string[];
+  minecraftVersion: string;
+  modLoader: 'forge' | 'fabric' | 'neoforge' | 'quilt';
+  mods: ModItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FriendItem {
+  id: string;
+  username: string;
+  friendCode: string;
+  userId?: string;
+  avatarUrl?: string;
+  bio?: string;
+}
+
+export interface UserProfile {
+  username: string;
+  email: string;
+  avatarUrl: string;
+  friendCode: string;
+}
+
+export interface DependencyAnalysisResult {
+  isValid: boolean;
+  cycles: string[][];
+  missingDependencies: {
+    modName: string;
+    missing: ModDependency[];
+  }[];
+}
+
+export interface UserPresence {
+  socketId: string;
+  username: string;
+  color: string;
+  activeView?: string;
+}
+
+export const POPULAR_MOD_CATEGORIES = [
+  'all',
+  'optimization',
+  'technology',
+  'magic',
+  'adventure',
+  'worldgen',
+  'food',
+  'storage',
+  'utility',
+  'decoration',
+] as const;
+
+export const COMMON_MC_VERSIONS = [
+  '1.7.10',
+  '1.8.9',
+  '1.9.4',
+  '1.10.2',
+  '1.11.2',
+  '1.12.2',
+  '1.13.2',
+  '1.14.4',
+  '1.15.2',
+  '1.16.5',
+  '1.17.1',
+  '1.18.2',
+  '1.19.2',
+  '1.19.4',
+  '1.20.1',
+  '1.20.4',
+  '1.20.6',
+  '1.21.1',
+  '1.21.4',
+  '1.21.11',
+  '26.1',
+  '26.2',
+  '26.3',
+] as const;

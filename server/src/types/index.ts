@@ -1,0 +1,239 @@
+// server/src/types/index.ts
+// Created by Jacob F on 2026-11-08
+
+/**
+ * Defines the types for the entire backend.
+ * Provides interfaces that are used in different modules
+ * to ensure dependency and type safety.
+ */
+
+/**
+ * Types of relationships between mods as defined by API
+ */
+export type DependencyType = 
+    'required' | 
+    'optional' | 
+    'incompatible' | 
+    'embedded';
+    
+/**
+ * Normalized mod dependency used in the application
+ */
+export interface ModDependency {
+    // Project ID of the mod dependency
+    projectId: string;
+    // Mod display name
+    name: string;
+    // URL slug
+    slug: string;
+    // Type of dependency relationship
+    type: DependencyType;
+    // VersionId if pinned by mod author
+    versionId?: string;
+    // External URL to the dependency page
+    projectUrl: string;
+}
+
+/**
+ * Incompatibility conflict diagnostic
+ */
+export interface ModIncompatibility {
+    //  The mod that declared incompatibility
+    sourceModName: string;
+    sourceModId: string;
+
+    // Conflicting mod present
+    conflictingModName: string;
+    conflictingModId: string;
+
+    reason: string;
+}
+
+/**
+ * Diagnostic for mods not compatibile with pack's version
+ */
+export interface ModVersionMismatch {
+    modId: string;
+    modName: string;
+    targetVersion?: string;
+    targetLoader?: string;
+    supportedVersions: string[];
+    supportedLoaders: string[];
+    reason: string;
+}
+
+/**
+ * Missing dependency diagnostic
+ */
+export interface MissingDependencyIssue {
+    modName: string;
+    modId: string;
+    missing: Array <{
+        id?: string;
+        projectId?: string;
+        name: string;
+        type?: DependencyType;
+        dependencyType?: DependencyType;
+    }>;
+}
+
+/**
+ * Result returned by the dependency graph analysis engine
+ */
+export interface DependencyAnalysisResult {
+    // True only if there are no cycles, no missing dependencies, no incompatibilities
+    isValid: boolean;
+    // Circular dependency chains detected
+    cycles: string[][];
+    // Required dependencies declared by mods that are missing
+    missingDependencies: MissingDependencyIssue[];
+    // Conflicting mod pairs detected
+    incompatibilities: ModIncompatibility[];
+    // Mods failing target game version
+    versionMismatches: ModVersionMismatch[];
+    // Step by step topologiccal load/install order
+    installOrder: string[];
+}
+
+/**
+ * Raw dependency entry returned by Modrinth API for a version:
+ * GET /project/{id}/version
+ */
+export interface ModrinthVersionDependency {
+    version_id: string | null;
+    project_id: string |null;
+    file_name: string | null;
+    dependency_type: DependencyType;
+}
+
+/**
+ * Raw version model returned by Modrinth API:
+ * GET /project/{id}/version
+ */
+export interface ModrinthVersion {
+    // All the fields returned by the Modrinth API for a version object
+    id: string;
+    project_id: string;
+    author_id: string;
+    featured: boolean;
+    name: string;
+    version_number: string;
+    game_versions: string[];
+    loaders: string[];
+    version_type: 'release' | 'beta' | 'alpha';
+    date_published: string;
+    downloads: number;
+    files: Array<{
+        hashes: {
+            // SHA1 and SHA512 are hashed values for file integrity verification
+            sha1: string;
+            sha512: string;
+        };
+        url: string; // Direct download URL
+        filename: string;   // Name of the file as stored
+        primary: boolean;   // Indicates if this is the main file for the version
+        size: number;   // File size in bytes
+        file_type?: string | null; // File extension/type if applicable
+    }>;
+    // The crucial part: the array of dependencies
+    dependencies: ModrinthVersionDependency[];
+}
+
+/**
+ * Minimal project details fetched from Modrinth:
+ * GET /projects?ids=[. . .]
+ */
+export interface ModrinthBatchProject {
+    id: string;
+    slug: string;   // URL-friendly identifier for the mod
+    title: string;
+    description: string;
+    icon_url?: string;  // URL to the mod's icon image
+}
+
+/**
+ * API Response payload for the dependency endpoint:
+ * GET /api/mods/:id/dependencies
+ */
+export interface ModDependenciesResponse {
+    projectId: string;
+    loader?: string;
+    gameVersion?: string;
+    resolvedVersion?: { // The version object that was resolved for the given filters
+        id: string;
+        versionNumber: string;
+        datePublished: string;
+    } | null;
+    dependencies: ModDependency[];
+}
+
+/**
+ * Official Modrinth .mrpack dependency loader keys
+ */
+export type ModrinthLoaderDependencyKey =
+  | 'forge'
+  | 'neoforge'
+  | 'fabric-loader'
+  | 'quilt-loader';
+
+/**
+ * Individual file entry inside modrinth.index.json (Modrinth Pack Format v1)
+ */
+export interface ModrinthPackFile {
+  /** Destination path relative to the Minecraft instance root (e.g. "mods/create.jar") */
+  path: string;
+  /** Cryptographic hashes required by Modrinth format validators */
+  hashes: {
+    sha1: string;
+    sha512: string;
+  };
+  /** Client and server side environment requirements */
+  env?: {
+    client: 'required' | 'optional' | 'unsupported';
+    server: 'required' | 'optional' | 'unsupported';
+  };
+  /** Array of direct HTTPS download URLs */
+  downloads: string[];
+  /** Exact file size in bytes */
+  fileSize: number;
+}
+
+/**
+ * Root structure of modrinth.index.json following Modrinth Pack Format v1
+ */
+export interface ModrinthIndexManifest {
+  formatVersion: 1;
+  game: 'minecraft';
+  versionId: string;
+  name: string;
+  summary?: string;
+  files: ModrinthPackFile[];
+  dependencies: {
+    minecraft: string;
+    [key: string]: string;
+  };
+}
+
+/**
+ * Root structure of CurseForge manifest.json
+ */
+export interface CurseForgeManifest {
+  minecraft: {
+    version: string;
+    modLoaders: Array<{
+      id: string;
+      primary: boolean;
+    }>;
+  };
+  manifestType: 'minecraftModpack';
+  manifestVersion: 1;
+  name: string;
+  version: string;
+  author: string;
+  files: Array<{
+    projectID: number;
+    fileID: number;
+    required: boolean;
+  }>;
+  overrides: string;
+}
