@@ -7,30 +7,50 @@ import { Server, Socket } from 'socket.io';
 import { ModComment, ModItem, UserPresence } from '../types/consts.js'; // Import the types.
 
 /**
-* - <Key= ModpackId, Value= Map<SocketId, UserPresence> >
-*
-* Tracks which users are in which modpack rooms. Used to broadcast updates to all users in a room.
-*/
+ * - <Key= ModpackId, Value= Map<SocketId, UserPresence> >
+ *
+ * Tracks which users are in which modpack rooms. Used to broadcast updates to all users in a room.
+ */
 const roomUsers = new Map<string, Map<string, UserPresence>>();
+
+function removeSocketFromRoom(io: Server, socket: Socket, roomKey: string) {
+  const usersMap = roomUsers.get(roomKey);
+  if (!usersMap) return;
+
+  const user = usersMap.get(socket.id);
+  usersMap.delete(socket.id);
+  if (usersMap.size === 0) {
+    roomUsers.delete(roomKey);
+  }
+
+  if (user) {
+    const remaining = usersMap ? Array.from(usersMap.values()) : [];
+    io.to(roomKey).emit('user_left', user);
+    io.to(roomKey).emit('room_users', remaining);
+    console.log(`👋 [Socket.io] ${user.username} left room ${roomKey}`);
+  }
+}
 
 /**
  * The server handles the following events:
  * - `join_room`: A user joins a modpack room.
+ * - `leave_room`: A user explicitly leaves a modpack room.
  * - `mod_add`: A mod gets added to the active modpack
  * - `mod_remove`: A mod gets removed from the active modpack
- * - `mod_vote`: A vote gets cast on a
+ * - `mod_vote`: A vote gets cast on a mod
  * - `mod_comment`: A comment gets added to a mod in the active modpack
  * - `disconnect`: A user disconnects from the server
  * @param io
  */
 export function setupCollaborationSockets(io: Server) {
-
   // Handle client connections and events.
   io.on('connection', (socket: Socket) => {
     console.log(`⚡ [Socket.io] Client connected: ${socket.id}`); // Log the id of the socket that just connected to the server
 
     // Join collaborative modpack room
     socket.on('join_room', ({ modpackId, username, color }) => {
+      if (!modpackId) return;
+
       const roomKey = `modpack:${modpackId}`;
       socket.join(roomKey);
 
@@ -46,15 +66,26 @@ export function setupCollaborationSockets(io: Server) {
         color: color || '#10b981',
       };
 
-      // Update room users map with new user.
-      roomUsers.get(roomKey)!.set(socket.id, user);
+      const usersMap = roomUsers.get(roomKey)!;
+      const alreadyPresent = usersMap.has(socket.id);
+      usersMap.set(socket.id, user);
 
       // Notify room of updated users list
-      const activeUsers = Array.from(roomUsers.get(roomKey)!.values());
+      const activeUsers = Array.from(usersMap.values());
       io.to(roomKey).emit('room_users', activeUsers); // Tell room of new user list.
-      socket.to(roomKey).emit('user_joined', user); // Notify other users of other user in room.
+      if (!alreadyPresent) {
+        socket.to(roomKey).emit('user_joined', user); // Notify other users of other user in room.
+      }
 
       console.log(`👥 [Socket.io] ${user.username} joined room ${roomKey}`);
+    });
+
+    // Explicitly leave collaborative modpack room (e.g. route unmount)
+    socket.on('leave_room', ({ modpackId }: { modpackId?: string }) => {
+      if (!modpackId) return;
+      const roomKey = `modpack:${modpackId}`;
+      socket.leave(roomKey);
+      removeSocketFromRoom(io, socket, roomKey);
     });
 
     // Mod added by a collaborator
@@ -116,18 +147,17 @@ export function setupCollaborationSockets(io: Server) {
     socket.on(
       'mod_comment',
       ({
-        modpackId, // Which room wer'e in
+        modpackId, // Which room we're in
         modId, // What specific mod this comment will be on
         comment: incomingComment, // Incoming comment object from client
       }: {
         modpackId: string;
         modId: string;
         comment?: ModComment;
-        }) => {
+      }) => {
         // Check to make sure the comment isnt blank, otherwise ignore it.
-        if (!incomingComment?.text?.trim())
-        {
-          return
+        if (!incomingComment?.text?.trim()) {
+          return;
         }
 
         const roomKey = `modpack:${modpackId}`;
@@ -144,14 +174,7 @@ export function setupCollaborationSockets(io: Server) {
     socket.on('disconnecting', () => {
       for (const roomKey of socket.rooms) {
         if (roomUsers.has(roomKey)) {
-          const user = roomUsers.get(roomKey)!.get(socket.id);
-          roomUsers.get(roomKey)!.delete(socket.id);
-
-          if (user) {
-            socket.to(roomKey).emit('user_left', user);
-            const remaining = Array.from(roomUsers.get(roomKey)!.values());
-            socket.to(roomKey).emit('room_users', remaining);
-          }
+          removeSocketFromRoom(io, socket, roomKey);
         }
       }
     });

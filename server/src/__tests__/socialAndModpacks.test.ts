@@ -20,6 +20,7 @@ import {
   acceptFriendRequest,
   acceptModpackInvite,
   addModToModpack,
+  commentOnMod,
   createModpack,
   deleteAccount,
   deleteModpack,
@@ -30,14 +31,17 @@ import {
   listFriends,
   listModpackInvites,
   listModpacks,
+  removeModFromModpack,
   sendFriendRequest,
   syncUser,
   updateModpack,
   uploadImage,
+  voteOnMod,
 } from '../controllers/modpackController.js';
 import { createModpackSchema } from '../schemas/modpackSchemas.js';
 import {
   computeFriendCode,
+  getModFeedback,
   resetStoreForTests,
   resolveContributorDisplayName,
 } from '../services/dataStore.js';
@@ -342,6 +346,189 @@ describe('Social, Permissions, UUID Resolution & Upload Flows', () => {
       aliceDeleteRes.res
     );
     expect(aliceDeleteRes.state.statusCode).toBe(204);
+  });
+
+  it('persists mod votes and comments consistently across reloads, updates, and toggle states', async () => {
+    const createRes = createMockRes();
+    await createModpack(
+      createMockReq({
+        body: {
+          title: 'Feedback Persistence Pack',
+          modLoader: 'fabric',
+          createdBy: ALICE_ID,
+          creatorName: 'AliceCrafter',
+        },
+      }),
+      createRes.res
+    );
+    const pack = createRes.state.body as { id: string };
+
+    const addModRes = createMockRes();
+    await addModToModpack(
+      createMockReq({
+        params: { id: pack.id },
+        headers: { 'x-user-id': ALICE_ID },
+        body: {
+          id: 'modrinth-AANobbMI',
+          source: 'modrinth',
+          externalModId: 'AANobbMI',
+          name: 'Sodium',
+          summary: 'Rendering optimization',
+          votes: { yes: ['AliceCrafter'], no: [] },
+          comments: [],
+        },
+      }),
+      addModRes.res
+    );
+    expect(addModRes.state.statusCode).toBe(201);
+
+    // Unauthorized user (Charlie) is blocked from voting/commenting
+    const unauthVote = createMockRes();
+    await voteOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': CHARLIE_ID },
+        body: { vote: 'no', user: 'CharlieMiner', userId: CHARLIE_ID, actorUserId: CHARLIE_ID },
+      }),
+      unauthVote.res
+    );
+    expect(unauthVote.state.statusCode).toBe(403);
+
+    const unauthComment = createMockRes();
+    await commentOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': CHARLIE_ID },
+        body: { text: 'Intruder comment', user: 'CharlieMiner', actorUserId: CHARLIE_ID },
+      }),
+      unauthComment.res
+    );
+    expect(unauthComment.state.statusCode).toBe(403);
+
+    // Alice votes NO (switches from initial YES -> NO)
+    const switchVoteRes = createMockRes();
+    await voteOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+        body: { vote: 'no', user: 'AliceCrafter', userId: ALICE_ID },
+      }),
+      switchVoteRes.res
+    );
+    expect(switchVoteRes.state.statusCode).toBe(200);
+    expect((switchVoteRes.state.body as { votes: { yes: string[]; no: string[] } }).votes).toEqual({
+      yes: [],
+      no: ['AliceCrafter'],
+    });
+
+    // Alice toggles NO off, then votes YES again
+    await voteOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+        body: { vote: 'no', user: 'AliceCrafter', userId: ALICE_ID },
+      }),
+      createMockRes().res
+    );
+    const yesVoteRes = createMockRes();
+    await voteOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+        body: { vote: 'yes', user: 'AliceCrafter', userId: ALICE_ID },
+      }),
+      yesVoteRes.res
+    );
+    expect((yesVoteRes.state.body as { votes: { yes: string[]; no: string[] } }).votes).toEqual({
+      yes: ['AliceCrafter'],
+      no: [],
+    });
+
+    // Alice posts a comment (and duplicate comment ID is ignored)
+    const commentRes1 = createMockRes();
+    await commentOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+        body: {
+          id: 'comment-persistent-1',
+          text: 'Keep Sodium for FPS!',
+          user: 'AliceCrafter',
+          createdAt: '2026-11-12T10:00:00.000Z',
+        },
+      }),
+      commentRes1.res
+    );
+    expect(commentRes1.state.statusCode).toBe(201);
+
+    await commentOnMod(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+        body: {
+          id: 'comment-persistent-1',
+          text: 'Keep Sodium for FPS!',
+          user: 'AliceCrafter',
+          createdAt: '2026-11-12T10:00:00.000Z',
+        },
+      }),
+      createMockRes().res
+    );
+
+    // PATCH update with blank votes/comments preserves stored feedback
+    const patchRes = createMockRes();
+    await updateModpack(
+      createMockReq({
+        params: { id: pack.id },
+        body: {
+          userId: ALICE_ID,
+          mods: [
+            {
+              id: 'modrinth-AANobbMI',
+              source: 'modrinth',
+              externalModId: 'AANobbMI',
+              name: 'Sodium',
+              summary: 'Rendering optimization',
+            },
+          ],
+        },
+      }),
+      patchRes.res
+    );
+    expect(patchRes.state.statusCode).toBe(200);
+
+    // Re-fetching via getModpackById and checking store preserves exact votes & single deduplicated comment
+    const getRes = createMockRes();
+    await getModpackById(
+      createMockReq({ params: { id: pack.id }, query: { userId: ALICE_ID } }),
+      getRes.res
+    );
+    expect(getRes.state.statusCode).toBe(200);
+    const fetched = getRes.state.body as {
+      mods: Array<{
+        id: string;
+        votes: { yes: string[]; no: string[] };
+        comments: Array<{ id: string; user: string; text: string }>;
+      }>;
+    };
+    expect(fetched.mods[0].votes).toEqual({ yes: ['AliceCrafter'], no: [] });
+    expect(fetched.mods[0].comments).toHaveLength(1);
+    expect(fetched.mods[0].comments[0].text).toBe('Keep Sodium for FPS!');
+
+    // Persisted feedback exists in store.json
+    const persisted = getModFeedback(pack.id, 'modrinth-AANobbMI', 'modrinth', 'AANobbMI');
+    expect(persisted?.votes).toEqual({ yes: ['AliceCrafter'], no: [] });
+    expect(persisted?.comments).toHaveLength(1);
+
+    // Removing the mod cleans up its feedback record
+    await removeModFromModpack(
+      createMockReq({
+        params: { id: pack.id, modId: 'modrinth-AANobbMI' },
+        headers: { 'x-user-id': ALICE_ID },
+      }),
+      createMockRes().res
+    );
+    expect(getModFeedback(pack.id, 'modrinth-AANobbMI', 'modrinth', 'AANobbMI')).toBeNull();
   });
 
   it('never leaks raw UUIDs like 231a6b00-2238-4798-a63e-5e95c6c0f8e2 as collaborator names', async () => {

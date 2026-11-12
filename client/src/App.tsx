@@ -151,6 +151,8 @@ export function App() {
               onEditModpack={pack.editModpackProject}
               onDeleteModpack={handleDeleteModpack}
               onInviteContributor={pack.inviteContributor}
+              onAcceptInvite={pack.acceptInvite}
+              onDeclineInvite={pack.declineInvite}
             />
           }
         />

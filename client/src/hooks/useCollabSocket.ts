@@ -57,11 +57,22 @@ export function useCollabSocket(
   }, []);
 
   useEffect(() => {
-    socket.emit('join_room', {
-      modpackId,
-      username,
-      color: userColor,
-    });
+    if (!modpackId || !username) {
+      return;
+    }
+
+    const joinRoom = () => {
+      socket.emit('join_room', {
+        modpackId,
+        username,
+        color: userColor,
+      });
+    };
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+    joinRoom();
 
     const handleRoomUsers = (users: UserPresence[]) => {
       setActiveUsers(users);
@@ -69,7 +80,7 @@ export function useCollabSocket(
 
     const handleModAdded = ({ mod, user: actor }: { mod: ModItem; user: string }) => {
       handlersRef.current.onModAdded?.(mod, actor);
-      showNotification(`${actor} addedadded "${mod.name}"`);
+      showNotification(`${actor} added "${mod.name}"`);
     };
 
     const handleModRemoved = ({ modId, user: actor }: { modId: string; user: string }) => {
@@ -101,6 +112,7 @@ export function useCollabSocket(
       showNotification(`${comment.user} commented`);
     };
 
+    socket.on('connect', joinRoom);
     socket.on('room_users', handleRoomUsers);
     socket.on('mod_added', handleModAdded);
     socket.on('mod_removed', handleModRemoved);
@@ -108,6 +120,9 @@ export function useCollabSocket(
     socket.on('mod_commented', handleModCommented);
 
     return () => {
+      socket.emit('leave_room', { modpackId });
+      setActiveUsers([]);
+      socket.off('connect', joinRoom);
       socket.off('room_users', handleRoomUsers);
       socket.off('mod_added', handleModAdded);
       socket.off('mod_removed', handleModRemoved);

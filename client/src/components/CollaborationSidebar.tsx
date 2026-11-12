@@ -31,8 +31,21 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
   const [inviteStatusMessage, setInviteStatusMessage] = useState<string | null>(null);
 
   const sanitizedContributors = contributors.filter((c) => c && !UUID_REGEX.test(c));
-  const acceptedContributors = Array.from(new Set([currentUser, ...sanitizedContributors]));
-  const onlineNames = new Set(activeUsers.map((u) => u.username));
+  const acceptedContributors: string[] = [];
+  const seenContributors = new Set<string>();
+  for (const name of [currentUser, ...sanitizedContributors]) {
+    const trimmed = (name || '').trim();
+    const key = trimmed.toLowerCase();
+    if (trimmed && !seenContributors.has(key)) {
+      seenContributors.add(key);
+      acceptedContributors.push(trimmed);
+    }
+  }
+
+  const onlineNames = new Set(
+    activeUsers.map((u) => (u.username || '').trim().toLowerCase()).filter(Boolean)
+  );
+  const currentUserNormalized = (currentUser || '').trim().toLowerCase();
 
   const handleInviteByCode = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,16 +68,30 @@ export const CollaborationSidebar: React.FC<CollaborationSidebarProps> = ({
 
           <ul className="space-y-1.5">
             {acceptedContributors.map((member) => {
-              const isOnline = onlineNames.has(member) || member === currentUser;
+              const memberNormalized = member.trim().toLowerCase();
+              const isSelf = memberNormalized === currentUserNormalized;
+              const isOnline = onlineNames.has(memberNormalized) || isSelf;
               return (
                 <li
                   key={member}
                   className="flex items-center justify-between border border-neutral-900 bg-neutral-900/50 px-2.5 py-1.5"
                 >
                   <span className="font-bold text-neutral-200">
-                    {member} {member === currentUser ? '(You)' : ''}
+                    {member} {isSelf ? '(You)' : ''}
                   </span>
-                  <span className="text-neutral-400">{isOnline ? 'Online' : 'Collaborator'}</span>
+                  {isOnline ? (
+                    <span
+                      data-testid="online-badge"
+                      className="inline-flex items-center gap-1.5 border border-green-700 bg-green-950/70 px-2 py-0.5 text-[11px] font-bold text-green-400"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+                      Online
+                    </span>
+                  ) : (
+                    <span data-testid="collaborator-badge" className="text-neutral-400">
+                      Collaborator
+                    </span>
+                  )}
                 </li>
               );
             })}

@@ -17,11 +17,19 @@ import { setupCollaborationSockets } from './sockets/collabHandler.js';
 const app = express();
 const server = http.createServer(app);
 
+const allowedOrigins = [
+  config.clientUrl,
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
 // Initialize Socket.io with CORS configuration on localhost and client URL
 // Note: This is a basic setup and would be adjusted for production environments.
 const io = new Server(server, {
   cors: {
-    origin: [config.clientUrl, 'http://localhost:3000', 'http://localhost:5173'],
+    origin: allowedOrigins,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     credentials: true,
   },
@@ -30,7 +38,7 @@ const io = new Server(server, {
 // Middlewares
 app.use(
   cors({
-    origin: [config.clientUrl, 'http://localhost:3000', 'http://localhost:5173'],
+    origin: allowedOrigins,
     credentials: true,
   })
 );

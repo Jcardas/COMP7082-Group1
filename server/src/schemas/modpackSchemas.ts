@@ -145,13 +145,16 @@ export const voteModSchema = z.object({
   vote: z.enum(['yes', 'no'], {
     message: "Vote must be strictly 'yes' or 'no'",
   }),
+  user: z.string().trim().min(1).optional(),
   userId: z.string().trim().min(1).optional().default('Anonymous'),
+  actorUserId: z.string().trim().optional(),
 });
 
 /**
  * Schema for posting a comment on a mod (1 to 1000 characters)
  */
 export const commentModSchema = z.object({
+  id: z.string().trim().min(1).optional(),
   text: z
     .string()
     .trim()
@@ -159,6 +162,8 @@ export const commentModSchema = z.object({
     .max(1000, 'Comment text cannot exceed 1000 characters'),
   user: z.string().trim().min(1).optional(),
   author: z.string().trim().min(1).optional(),
+  userId: z.string().trim().optional(),
+  createdAt: z.string().optional(),
 });
 
 /**

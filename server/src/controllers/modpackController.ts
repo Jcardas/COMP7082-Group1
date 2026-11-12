@@ -13,19 +13,25 @@ import { fileURLToPath } from 'url';
 import { isConfigured as isEmbeddingConfigured } from '../lib/huggingface.js';
 import { supabase } from '../lib/supabase.js';
 import {
+  addStoredModComment,
   computeFriendCode,
+  deleteModFeedbackItem,
+  deleteModpackFeedback,
   findDirectoryUser,
   findDirectoryUserByFriendCode,
   findDirectoryUserById,
+  getModFeedback,
+  initModFeedbackIfAbsent,
   isUuid,
   loadStore,
   removeUserFromStore,
   resolveContributorDisplayName,
   saveStore,
   syncSupabaseUsers,
+  toggleStoredModVote,
   upsertDirectoryUser,
 } from '../services/dataStore.js';
-import { FriendItem, FriendRequest, ModItem, Modpack, ModpackInvite } from '../types/consts.js';
+import { FriendItem, FriendRequest, ModComment, ModItem, Modpack, ModpackInvite } from '../types/consts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,6 +48,15 @@ function getRequestUserId(req: Request): string {
   const fromBody =
     req.body && typeof req.body.userId === 'string' ? req.body.userId.trim() : '';
   return fromQuery || fromHeader || fromBody || '';
+}
+
+function getRequestActorId(req: Request): string {
+  const fromHeader =
+    typeof req.headers['x-user-id'] === 'string' ? req.headers['x-user-id'].trim() : '';
+  const fromQuery = typeof req.query.userId === 'string' ? req.query.userId.trim() : '';
+  const fromActorBody =
+    req.body && typeof req.body.actorUserId === 'string' ? req.body.actorUserId.trim() : '';
+  return fromHeader || fromQuery || fromActorBody || '';
 }
 
 function getRequestUsername(req: Request): string {
@@ -62,13 +77,35 @@ function userHasModpackAccess(pack: Modpack, userId: string, username?: string):
   return false;
 }
 
+function overlayFeedbackOnMod(packId: string, mod: ModItem): ModItem {
+  const stored = getModFeedback(packId, mod.id, mod.source, mod.externalModId);
+  if (!stored) return mod;
+  return {
+    ...mod,
+    votes: stored.votes,
+    comments: stored.comments,
+  };
+}
+
+function overlayFeedbackOnPack(pack: Modpack): Modpack {
+  return {
+    ...pack,
+    mods: (pack.mods || []).map((m) => overlayFeedbackOnMod(pack.id, m)),
+  };
+}
+
 /**
  * Maps a raw database row from `modpack_mods` into a normalized `ModItem`
  */
-function mapDbRowToModItem(row: Record<string, unknown>, memMod?: ModItem): ModItem {
+function mapDbRowToModItem(
+  row: Record<string, unknown>,
+  memMod?: ModItem,
+  modpackId?: string
+): ModItem {
   const source = (row.source === 'curseforge' ? 'curseforge' : 'modrinth') as ModItem['source'];
   const externalModId = String(row.external_mod_id || row.externalModId || '');
   const id = memMod?.id || `${source}-${externalModId}`;
+  const stored = modpackId ? getModFeedback(modpackId, id, source, externalModId) : null;
   return {
     id,
     source,
@@ -88,8 +125,8 @@ function mapDbRowToModItem(row: Record<string, unknown>, memMod?: ModItem): ModI
     loaders: memMod?.loaders || [],
     gameVersions: memMod?.gameVersions || [],
     addedBy: row.added_by ? String(row.added_by) : memMod?.addedBy || 'Collaborator',
-    votes: memMod?.votes || { yes: [], no: [] },
-    comments: memMod?.comments || [],
+    votes: stored?.votes || memMod?.votes || { yes: [], no: [] },
+    comments: stored?.comments || memMod?.comments || [],
     createdAt: row.created_at ? String(row.created_at) : memMod?.createdAt,
   };
 }
@@ -197,9 +234,9 @@ async function hydrateSupabaseModpack(
           const memMod = mem?.mods.find(
             (m) => m.externalModId === extId && m.source === src
           );
-          return mapDbRowToModItem(r, memMod);
+          return mapDbRowToModItem(r, memMod, pid);
         })
-      : mem?.mods || [];
+      : (mem?.mods || []).map((m) => overlayFeedbackOnMod(pid, m));
 
   const createdBy = p.created_by ? String(p.created_by) : mem?.createdBy;
   const dbCollabIds = collabRows.map((c) => String(c.user_id));
@@ -236,6 +273,40 @@ async function hydrateSupabaseModpack(
 
   inMemoryModpacks.set(pid, fullPack);
   return fullPack;
+}
+
+async function loadOrHydrateModpack(id: string): Promise<Modpack | undefined> {
+  const mem = inMemoryModpacks.get(id);
+  if (mem) {
+    const overlaid = overlayFeedbackOnPack(mem);
+    inMemoryModpacks.set(id, overlaid);
+    return overlaid;
+  }
+
+  if (supabase && isUuid(id)) {
+    try {
+      const { data: pack, error } = await supabase
+        .from('modpacks')
+        .select('*')
+        .eq('id', id)
+        .single();
+      if (!error && pack) {
+        const [{ data: modRows }, { data: collabRows }] = await Promise.all([
+          supabase.from('modpack_mods').select('*').eq('modpack_id', id),
+          supabase.from('modpack_collaborators').select('*').eq('modpack_id', id),
+        ]);
+        return hydrateSupabaseModpack(
+          pack as Record<string, unknown>,
+          (modRows || []) as Record<string, unknown>[],
+          (collabRows || []) as Record<string, unknown>[]
+        );
+      }
+    } catch (err) {
+      console.warn('Supabase hydrate failed:', err);
+    }
+  }
+
+  return undefined;
 }
 
 /**
@@ -414,9 +485,9 @@ export async function listModpacks(req: Request, res: Response) {
       if (!error && packs) {
         const packIds = packs.map((p: Record<string, unknown>) => String(p.id));
         if (packIds.length === 0) {
-          const memOnly = Array.from(inMemoryModpacks.values()).filter(
-            (m) => !isUuid(m.id) && userHasModpackAccess(m, userId, username)
-          );
+          const memOnly = Array.from(inMemoryModpacks.values())
+            .filter((m) => !isUuid(m.id) && userHasModpackAccess(m, userId, username))
+            .map(overlayFeedbackOnPack);
           return res.json({ modpacks: memOnly });
         }
 
@@ -450,9 +521,9 @@ export async function listModpacks(req: Request, res: Response) {
           })
         );
 
-        const memOnly = Array.from(inMemoryModpacks.values()).filter(
-          (m) => !isUuid(m.id) && userHasModpackAccess(m, userId, username)
-        );
+        const memOnly = Array.from(inMemoryModpacks.values())
+          .filter((m) => !isUuid(m.id) && userHasModpackAccess(m, userId, username))
+          .map(overlayFeedbackOnPack);
 
         return res.json({ modpacks: [...mapped, ...memOnly] });
       }
@@ -461,9 +532,9 @@ export async function listModpacks(req: Request, res: Response) {
     }
   }
 
-  const visiblePacks = Array.from(inMemoryModpacks.values()).filter((p) =>
-    userHasModpackAccess(p, userId, username)
-  );
+  const visiblePacks = Array.from(inMemoryModpacks.values())
+    .filter((p) => userHasModpackAccess(p, userId, username))
+    .map(overlayFeedbackOnPack);
   return res.json({ modpacks: visiblePacks });
 }
 
@@ -527,7 +598,8 @@ export async function createModpack(req: Request, res: Response) {
           modpackTitle: packTitle,
           invitedUser: inviteeLabel,
           invitedUserId: target?.userId || (isUuid(rawInvitee) ? rawInvitee : undefined),
-          invitedFriendCode: target?.friendCode || (/^MCMC-\d+$/i.test(rawInvitee) ? rawInvitee.toUpperCase() : undefined),
+          invitedFriendCode:
+            target?.friendCode || (/^MCMC-\d+$/i.test(rawInvitee) ? rawInvitee.toUpperCase() : undefined),
           invitedBy: ownerDisplay,
           invitedById: createdBy,
           status: 'pending',
@@ -682,7 +754,7 @@ export async function getModpackById(req: Request, res: Response) {
     return res.status(403).json({ error: 'You do not have access to this modpack' });
   }
 
-  return res.json(modpack);
+  return res.json(overlayFeedbackOnPack(modpack));
 }
 
 /**
@@ -696,21 +768,7 @@ export async function updateModpack(req: Request, res: Response) {
   const userId = getRequestUserId(req);
   const username = getRequestUsername(req);
 
-  let existing = inMemoryModpacks.get(id);
-  if (!existing && supabase && isUuid(id)) {
-    const { data: pack } = await supabase.from('modpacks').select('*').eq('id', id).single();
-    if (pack) {
-      const [{ data: modRows }, { data: collabRows }] = await Promise.all([
-        supabase.from('modpack_mods').select('*').eq('modpack_id', id),
-        supabase.from('modpack_collaborators').select('*').eq('modpack_id', id),
-      ]);
-      existing = await hydrateSupabaseModpack(
-        pack as Record<string, unknown>,
-        (modRows || []) as Record<string, unknown>[],
-        (collabRows || []) as Record<string, unknown>[]
-      );
-    }
-  }
+  const existing = await loadOrHydrateModpack(id);
 
   if (existing && userId && !userHasModpackAccess(existing, userId, username)) {
     return res.status(403).json({ error: 'You do not have permission to edit this modpack' });
@@ -738,6 +796,16 @@ export async function updateModpack(req: Request, res: Response) {
     ? await resolveContributorsList(contributors)
     : existing?.contributors ?? [];
 
+  const mergedMods = mods
+    ? mods.map((m) => {
+        const stored = getModFeedback(id, m.id, m.source, m.externalModId);
+        if (stored) {
+          return { ...m, votes: stored.votes, comments: stored.comments };
+        }
+        return m;
+      })
+    : existing?.mods ?? [];
+
   const updated: Modpack = {
     id,
     title: title ?? existing?.title ?? 'Collaborative Pack',
@@ -749,7 +817,7 @@ export async function updateModpack(req: Request, res: Response) {
     pendingInvites: pendingInvites ?? existing?.pendingInvites ?? [],
     minecraftVersion: minecraftVersion ?? existing?.minecraftVersion ?? '1.21.1',
     modLoader: modLoader ?? existing?.modLoader ?? 'forge',
-    mods: mods ?? existing?.mods ?? [],
+    mods: mergedMods,
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -769,7 +837,7 @@ export async function updateModpack(req: Request, res: Response) {
         .eq('id', id);
 
       if (Array.isArray(mods)) {
-        await syncModpackModsToSupabase(id, mods);
+        await syncModpackModsToSupabase(id, mergedMods);
       }
     } catch (err) {
       console.warn('Supabase updateModpack warning:', err);
@@ -788,22 +856,7 @@ export async function addModToModpack(req: Request, res: Response) {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const userId = getRequestUserId(req);
   const username = getRequestUsername(req);
-  let modpack = inMemoryModpacks.get(id);
-
-  if (!modpack && supabase && isUuid(id)) {
-    const { data: pack } = await supabase.from('modpacks').select('*').eq('id', id).single();
-    if (pack) {
-      const [{ data: modRows }, { data: collabRows }] = await Promise.all([
-        supabase.from('modpack_mods').select('*').eq('modpack_id', id),
-        supabase.from('modpack_collaborators').select('*').eq('modpack_id', id),
-      ]);
-      modpack = await hydrateSupabaseModpack(
-        pack as Record<string, unknown>,
-        (modRows || []) as Record<string, unknown>[],
-        (collabRows || []) as Record<string, unknown>[]
-      );
-    }
-  }
+  const modpack = await loadOrHydrateModpack(id);
 
   if (!modpack) {
     return res.status(404).json({ error: 'Modpack not found' });
@@ -814,11 +867,20 @@ export async function addModToModpack(req: Request, res: Response) {
   }
 
   const incomingMod = req.body;
+  const resolvedId = incomingMod.id || `${incomingMod.source}-${incomingMod.externalModId}`;
+  const feedback = initModFeedbackIfAbsent(
+    id,
+    resolvedId,
+    incomingMod.votes,
+    incomingMod.comments,
+    [incomingMod.externalModId]
+  );
+
   const newMod: ModItem = {
     ...incomingMod,
-    id: incomingMod.id || `${incomingMod.source}-${incomingMod.externalModId}`,
-    votes: incomingMod.votes || { yes: [], no: [] },
-    comments: incomingMod.comments || [],
+    id: resolvedId,
+    votes: feedback.votes,
+    comments: feedback.comments,
   };
 
   const exists = modpack.mods.some(
@@ -872,12 +934,13 @@ export async function removeModFromModpack(req: Request, res: Response) {
   const userId = getRequestUserId(req);
   const username = getRequestUsername(req);
 
-  const modpack = inMemoryModpacks.get(id);
+  const modpack = await loadOrHydrateModpack(id);
   if (modpack && userId && !userHasModpackAccess(modpack, userId, username)) {
     return res.status(403).json({ error: 'You do not have permission to edit this modpack' });
   }
 
   const removedMod = modpack?.mods.find((m) => m.id === modId || m.externalModId === modId);
+  deleteModFeedbackItem(id, modId, removedMod ? [removedMod.id, removedMod.externalModId] : []);
 
   if (modpack) {
     modpack.mods = modpack.mods.filter((m) => m.id !== modId && m.externalModId !== modId);
@@ -917,21 +980,7 @@ export async function inviteCollaboratorToModpack(req: Request, res: Response) {
     invitedById?: string;
   };
 
-  let modpack = inMemoryModpacks.get(modpackId);
-  if (!modpack && supabase && isUuid(modpackId)) {
-    const { data: pack } = await supabase.from('modpacks').select('*').eq('id', modpackId).single();
-    if (pack) {
-      const [{ data: modRows }, { data: collabRows }] = await Promise.all([
-        supabase.from('modpack_mods').select('*').eq('modpack_id', modpackId),
-        supabase.from('modpack_collaborators').select('*').eq('modpack_id', modpackId),
-      ]);
-      modpack = await hydrateSupabaseModpack(
-        pack as Record<string, unknown>,
-        (modRows || []) as Record<string, unknown>[],
-        (collabRows || []) as Record<string, unknown>[]
-      );
-    }
-  }
+  const modpack = await loadOrHydrateModpack(modpackId);
 
   const modpackTitle = modpack?.title || 'Collaborative Modpack';
   const targetUser =
@@ -1143,17 +1192,23 @@ export function declineModpackInvite(req: Request, res: Response) {
 
 /**
  * POST /api/modpacks/:id/mods/:modId/vote
- * Records a user's 'yes' or 'no' vote on a mod inside a modpack
+ * Toggles and persists a user's 'yes' or 'no' vote on a mod inside a modpack
  */
-export function voteOnMod(req: Request, res: Response) {
+export async function voteOnMod(req: Request, res: Response) {
   const rawId = req.params.id;
   const rawModId = req.params.modId;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const modId = Array.isArray(rawModId) ? rawModId[0] : rawModId;
 
-  const modpack = inMemoryModpacks.get(id);
+  const modpack = await loadOrHydrateModpack(id);
   if (!modpack) {
     return res.status(404).json({ error: 'Modpack not found' });
+  }
+
+  const actorId = getRequestActorId(req);
+  const username = getRequestUsername(req);
+  if (actorId && !userHasModpackAccess(modpack, actorId, username)) {
+    return res.status(403).json({ error: 'You do not have permission to vote in this modpack' });
   }
 
   const mod = modpack.mods.find((m) => m.id === modId || m.externalModId === modId);
@@ -1161,28 +1216,40 @@ export function voteOnMod(req: Request, res: Response) {
     return res.status(404).json({ error: 'Mod not found in modpack' });
   }
 
-  const { vote, userId } = req.body as { vote: 'yes' | 'no'; userId: string };
-  mod.votes = mod.votes || { yes: [], no: [] };
-  mod.votes.yes = mod.votes.yes.filter((u: string) => u !== userId);
-  mod.votes.no = mod.votes.no.filter((u: string) => u !== userId);
-  mod.votes[vote].push(userId);
+  const { vote, user, userId } = req.body as {
+    vote: 'yes' | 'no';
+    user?: string;
+    userId: string;
+  };
+  const voterName = (user || userId || 'Anonymous').trim();
+  const nextVotes = toggleStoredModVote(id, mod.id, voterName, vote, [mod.externalModId, modId]);
+
+  mod.votes = nextVotes;
+  modpack.updatedAt = new Date().toISOString();
+  inMemoryModpacks.set(id, modpack);
 
   return res.json({ modId: mod.id, votes: mod.votes });
 }
 
 /**
  * POST /api/modpacks/:id/mods/:modId/comments
- * Appends a peer comment to a mod inside a modpack
+ * Appends and persists a peer comment to a mod inside a modpack
  */
-export function commentOnMod(req: Request, res: Response) {
+export async function commentOnMod(req: Request, res: Response) {
   const rawId = req.params.id;
   const rawModId = req.params.modId;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const modId = Array.isArray(rawModId) ? rawModId[0] : rawModId;
 
-  const modpack = inMemoryModpacks.get(id);
+  const modpack = await loadOrHydrateModpack(id);
   if (!modpack) {
     return res.status(404).json({ error: 'Modpack not found' });
+  }
+
+  const actorId = getRequestActorId(req);
+  const username = getRequestUsername(req);
+  if (actorId && !userHasModpackAccess(modpack, actorId, username)) {
+    return res.status(403).json({ error: 'You do not have permission to comment in this modpack' });
   }
 
   const mod = modpack.mods.find((m) => m.id === modId || m.externalModId === modId);
@@ -1190,21 +1257,25 @@ export function commentOnMod(req: Request, res: Response) {
     return res.status(404).json({ error: 'Mod not found in modpack' });
   }
 
-  const { text, user, author } = req.body as {
+  const { id: commentId, text, user, author, createdAt } = req.body as {
+    id?: string;
     text: string;
     user?: string;
     author?: string;
+    createdAt?: string;
   };
 
-  const newComment = {
-    id: `comment-${Date.now()}`,
+  const newComment: ModComment = {
+    id: commentId || `comment-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`,
     user: user || author || 'Anonymous',
     text,
-    createdAt: new Date().toISOString(),
+    createdAt: createdAt || new Date().toISOString(),
   };
 
-  mod.comments = mod.comments || [];
-  mod.comments.push(newComment);
+  const storedComments = addStoredModComment(id, mod.id, newComment, [mod.externalModId, modId]);
+  mod.comments = storedComments;
+  modpack.updatedAt = new Date().toISOString();
+  inMemoryModpacks.set(id, modpack);
 
   return res.status(201).json(newComment);
 }
@@ -1226,6 +1297,7 @@ export async function deleteModpack(req: Request, res: Response) {
 
   inMemoryModpacks.delete(id);
   delete store.modpackImages[id];
+  deleteModpackFeedback(id);
   store.modpackInvites = store.modpackInvites.filter((inv) => inv.modpackId !== id);
   saveStore();
 

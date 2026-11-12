@@ -2,6 +2,7 @@ import type {
   DependencyAnalysisResult,
   FriendItem,
   FriendRequest,
+  ModComment,
   ModItem,
   Modpack,
   ModpackInvite,
@@ -283,6 +284,62 @@ export async function removeModFromPackApi(
     }
   );
   if (!res.ok) throw new Error('Failed to remove mod from modpack');
+}
+
+export async function voteModApi(
+  modpackId: string,
+  modId: string,
+  vote: 'yes' | 'no',
+  user: string,
+  actorUserId?: string
+): Promise<{ modId: string; votes: { yes: string[]; no: string[] } }> {
+  const res = await fetch(
+    `${BASE_URL}/modpacks/${modpackId}/mods/${encodeURIComponent(modId)}/vote`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(actorUserId ? { 'x-user-id': actorUserId } : {}),
+        ...(user ? { 'x-username': user } : {}),
+      },
+      body: JSON.stringify({
+        vote,
+        user,
+        userId: actorUserId || user,
+        actorUserId: actorUserId || undefined,
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to record mod vote'));
+  return res.json();
+}
+
+export async function commentModApi(
+  modpackId: string,
+  modId: string,
+  comment: ModComment,
+  actorUserId?: string
+): Promise<ModComment> {
+  const res = await fetch(
+    `${BASE_URL}/modpacks/${modpackId}/mods/${encodeURIComponent(modId)}/comments`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(actorUserId ? { 'x-user-id': actorUserId } : {}),
+        ...(comment.user ? { 'x-username': comment.user } : {}),
+      },
+      body: JSON.stringify({
+        id: comment.id,
+        text: comment.text,
+        user: comment.user,
+        userId: actorUserId || undefined,
+        createdAt: comment.createdAt,
+      }),
+    }
+  );
+  if (!res.ok) throw new Error(await parseErrorMessage(res, 'Failed to post mod comment'));
+  return res.json();
 }
 
 export async function deleteModpack(id: string, userId?: string): Promise<void> {

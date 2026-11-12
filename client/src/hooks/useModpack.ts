@@ -3,6 +3,7 @@ import {
   acceptFriendRequest as apiAcceptFriendRequest,
   acceptModpackInvite as apiAcceptInvite,
   addModToPackApi,
+  commentModApi,
   createModpack as apiCreateModpack,
   declineFriendRequest as apiDeclineFriendRequest,
   declineModpackInvite as apiDeclineInvite,
@@ -23,6 +24,7 @@ import {
   sendFriendRequest as apiSendFriendRequest,
   sendModpackInvite,
   updateModpack as apiUpdateModpack,
+  voteModApi,
 } from '../services/api';
 import { socket } from '../services/socket';
 import type {
@@ -392,13 +394,16 @@ export function useModpack(
       );
 
       for (const item of allToAdd) {
-        addModToPackApi(targetModpackId, item, currentUserId).catch(() => {});
         socket.emit('mod_add', {
           modpackId: targetModpackId,
           mod: item,
           user,
         });
       }
+
+      await Promise.all(
+        allToAdd.map((item) => addModToPackApi(targetModpackId, item, currentUserId).catch(() => null))
+      );
       apiUpdateModpack(targetModpackId, { mods: updatedMods, userId: currentUserId }).catch(() => {});
 
       return { addedDeps: requiredDeps };
@@ -442,6 +447,7 @@ export function useModpack(
 
   const voteMod = useCallback(
     (modId: string, vote: 'yes' | 'no', user = currentUser) => {
+      const targetPackId = modpack.id;
       setModpack((prev) => ({
         ...prev,
         mods: prev.mods.map((mod) => {
@@ -451,18 +457,68 @@ export function useModpack(
         }),
       }));
 
+      setModpacks((prev) =>
+        prev.map((p) =>
+          p.id === targetPackId
+            ? {
+                ...p,
+                mods: p.mods.map((mod) => {
+                  if (mod.id !== modId) return mod;
+                  const currentVotes = mod.votes || { yes: [], no: [] };
+                  return { ...mod, votes: toggleUserVote(currentVotes, user, vote) };
+                }),
+              }
+            : p
+        )
+      );
+
       socket.emit('mod_vote', {
-        modpackId: modpack.id,
+        modpackId: targetPackId,
         modId,
         vote,
         user,
       });
+
+      if (targetPackId) {
+        voteModApi(targetPackId, modId, vote, user, currentUserId)
+          .then((result) => {
+            if (!result?.votes) return;
+            setModpack((prev) =>
+              prev.id === targetPackId
+                ? {
+                    ...prev,
+                    mods: prev.mods.map((mod) =>
+                      mod.id === modId || mod.id === result.modId
+                        ? { ...mod, votes: result.votes }
+                        : mod
+                    ),
+                  }
+                : prev
+            );
+            setModpacks((prev) =>
+              prev.map((p) =>
+                p.id === targetPackId
+                  ? {
+                      ...p,
+                      mods: p.mods.map((mod) =>
+                        mod.id === modId || mod.id === result.modId
+                          ? { ...mod, votes: result.votes }
+                          : mod
+                      ),
+                    }
+                  : p
+              )
+            );
+          })
+          .catch((err) => console.warn('Could not persist mod vote:', err));
+      }
     },
-    [currentUser, modpack.id]
+    [currentUser, currentUserId, modpack.id]
   );
 
   const commentMod = useCallback(
     (modId: string, text: string, user = currentUser) => {
+      const targetPackId = modpack.id;
       const newComment: ModComment = {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         user,
@@ -470,24 +526,38 @@ export function useModpack(
         createdAt: new Date().toISOString(),
       };
 
-      setModpack((prev) => ({
-        ...prev,
-        mods: prev.mods.map((mod) => {
+      const appendComment = (mods: ModItem[]) =>
+        mods.map((mod) => {
           if (mod.id !== modId) return mod;
+          if ((mod.comments || []).some((c) => c.id === newComment.id)) return mod;
           return {
             ...mod,
             comments: [...(mod.comments || []), newComment],
           };
-        }),
+        });
+
+      setModpack((prev) => ({
+        ...prev,
+        mods: appendComment(prev.mods),
       }));
 
+      setModpacks((prev) =>
+        prev.map((p) => (p.id === targetPackId ? { ...p, mods: appendComment(p.mods) } : p))
+      );
+
       socket.emit('mod_comment', {
-        modpackId: modpack.id,
+        modpackId: targetPackId,
         modId,
         comment: newComment,
       });
+
+      if (targetPackId) {
+        commentModApi(targetPackId, modId, newComment, currentUserId).catch((err) =>
+          console.warn('Could not persist mod comment:', err)
+        );
+      }
     },
-    [currentUser, modpack.id]
+    [currentUser, currentUserId, modpack.id]
   );
 
   // Modpack Project CRUD

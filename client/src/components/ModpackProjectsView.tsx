@@ -48,6 +48,8 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
 }) => {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingPack, setEditingPack] = useState<Modpack | null>(null);
+  const [respondingInviteId, setRespondingInviteId] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   // Create/Edit form state
   const [title, setTitle] = useState('');
@@ -58,6 +60,20 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedInviteCodes, setSelectedInviteCodes] = useState<string[]>([]);
   const [inviteCodeInput, setInviteCodeInput] = useState('');
+
+  const handleRespondInvite = async (inviteId: string, action: 'accept' | 'decline') => {
+    const handler = action === 'accept' ? onAcceptInvite : onDeclineInvite;
+    if (!handler) return;
+    setInviteError(null);
+    setRespondingInviteId(inviteId);
+    try {
+      await handler(inviteId);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : `Failed to ${action} modpack invitation`);
+    } finally {
+      setRespondingInviteId(null);
+    }
+  };
 
   const openCreateModal = () => {
     setTitle('');
@@ -273,42 +289,56 @@ export const ModpackProjectsView: React.FC<ModpackProjectsViewProps> = ({
 
       {/* Pending Modpack Invitations Banner */}
       {invites.length > 0 && (
-        <div className="border border-neutral-700 bg-neutral-950 p-3 text-xs space-y-2">
+        <div
+          data-testid="pending-modpack-invites"
+          className="border border-neutral-700 bg-neutral-950 p-3 text-xs space-y-2"
+        >
           <strong className="text-white block">Pending Modpack Invitations</strong>
+          {inviteError && (
+            <div className="border border-red-800 bg-red-950/50 px-2.5 py-1.5 text-red-300">
+              {inviteError}
+            </div>
+          )}
           <div className="space-y-1.5">
-            {invites.map((inv) => (
-              <div
-                key={inv.id}
-                className="flex flex-wrap items-center justify-between gap-2 border border-neutral-800 bg-neutral-900 p-2"
-              >
-                <div>
-                  <span className="font-bold text-white">{inv.modpackTitle}</span>{' '}
-                  <span className="text-neutral-400">
-                    — Invited by {inv.invitedBy}
-                  </span>
+            {invites.map((inv) => {
+              const isBusy = respondingInviteId === inv.id;
+              return (
+                <div
+                  key={inv.id}
+                  data-testid={`modpack-invite-${inv.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 border border-neutral-800 bg-neutral-900 p-2"
+                >
+                  <div>
+                    <span className="font-bold text-white">{inv.modpackTitle}</span>{' '}
+                    <span className="text-neutral-400">
+                      — Invited by {inv.invitedBy}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {onAcceptInvite && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleRespondInvite(inv.id, 'accept')}
+                        className="border border-neutral-600 bg-neutral-800 px-2.5 py-1 font-bold text-white hover:bg-neutral-700 disabled:opacity-50"
+                      >
+                        {isBusy ? 'Accepting...' : 'Accept & Join'}
+                      </button>
+                    )}
+                    {onDeclineInvite && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleRespondInvite(inv.id, 'decline')}
+                        className="border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-neutral-400 hover:bg-neutral-900 disabled:opacity-50"
+                      >
+                        Decline
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  {onAcceptInvite && (
-                    <button
-                      type="button"
-                      onClick={() => void onAcceptInvite(inv.id)}
-                      className="border border-neutral-600 bg-neutral-800 px-2.5 py-1 font-bold text-white hover:bg-neutral-700"
-                    >
-                      Accept &amp; Join
-                    </button>
-                  )}
-                  {onDeclineInvite && (
-                    <button
-                      type="button"
-                      onClick={() => void onDeclineInvite(inv.id)}
-                      className="border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-neutral-400 hover:bg-neutral-900"
-                    >
-                      Decline
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

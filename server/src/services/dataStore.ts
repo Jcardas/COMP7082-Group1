@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabase } from '../lib/supabase.js';
-import type { FriendRequest, ModpackInvite } from '../types/consts.js';
+import type { FriendRequest, ModComment, ModpackInvite } from '../types/consts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -37,12 +37,18 @@ export interface FriendshipRecord {
   createdAt: string;
 }
 
+export interface ModFeedbackRecord {
+  votes: { yes: string[]; no: string[] };
+  comments: ModComment[];
+}
+
 interface PersistedState {
   users: Record<string, DirectoryUser>;
   friendRequests: FriendRequest[];
   friendships: FriendshipRecord[];
   modpackInvites: ModpackInvite[];
   modpackImages: Record<string, string>;
+  modFeedback: Record<string, Record<string, ModFeedbackRecord>>;
 }
 
 const DEFAULT_STORE_PATH = path.resolve(__dirname, '../../.data/store.json');
@@ -57,6 +63,7 @@ let state: PersistedState = {
   friendships: [],
   modpackInvites: [],
   modpackImages: {},
+  modFeedback: {},
 };
 
 let loadedFromPath: string | null = null;
@@ -77,6 +84,7 @@ export function loadStore(forceReload = false): PersistedState {
         friendships: Array.isArray(parsed.friendships) ? parsed.friendships : [],
         modpackInvites: Array.isArray(parsed.modpackInvites) ? parsed.modpackInvites : [],
         modpackImages: parsed.modpackImages || {},
+        modFeedback: parsed.modFeedback || {},
       };
     } else {
       state = {
@@ -85,6 +93,7 @@ export function loadStore(forceReload = false): PersistedState {
         friendships: [],
         modpackInvites: [],
         modpackImages: {},
+        modFeedback: {},
       };
     }
   } catch (err) {
@@ -112,10 +121,174 @@ export function resetStoreForTests(): void {
     friendships: [],
     modpackInvites: [],
     modpackImages: {},
+    modFeedback: {},
   };
   loadedFromPath = getStorePath();
   if (fs.existsSync(loadedFromPath)) {
     fs.unlinkSync(loadedFromPath);
+  }
+}
+
+function resolveFeedbackEntry(
+  packFeedback: Record<string, ModFeedbackRecord>,
+  primaryKey: string,
+  fallbackKeys: string[] = []
+): { key: string; record: ModFeedbackRecord } {
+  const candidates = [primaryKey, ...fallbackKeys].filter(Boolean);
+  for (const k of candidates) {
+    if (packFeedback[k]) {
+      // Migrate to primaryKey if accessed via fallback key
+      if (k !== primaryKey && !packFeedback[primaryKey]) {
+        packFeedback[primaryKey] = packFeedback[k];
+        delete packFeedback[k];
+      }
+      return {
+        key: primaryKey,
+        record: packFeedback[primaryKey],
+      };
+    }
+  }
+  const fresh: ModFeedbackRecord = {
+    votes: { yes: [], no: [] },
+    comments: [],
+  };
+  packFeedback[primaryKey] = fresh;
+  return { key: primaryKey, record: fresh };
+}
+
+export function getModFeedback(
+  modpackId: string,
+  modId: string,
+  source?: string,
+  externalModId?: string
+): ModFeedbackRecord | null {
+  loadStore();
+  const packFeedback = state.modFeedback[modpackId];
+  if (!packFeedback) return null;
+
+  const keysToTry = [
+    modId,
+    source && externalModId ? `${source}-${externalModId}` : '',
+    externalModId || '',
+  ].filter(Boolean);
+
+  for (const k of keysToTry) {
+    if (packFeedback[k]) {
+      return {
+        votes: {
+          yes: [...(packFeedback[k].votes?.yes || [])],
+          no: [...(packFeedback[k].votes?.no || [])],
+        },
+        comments: [...(packFeedback[k].comments || [])],
+      };
+    }
+  }
+  return null;
+}
+
+export function initModFeedbackIfAbsent(
+  modpackId: string,
+  modId: string,
+  votes?: { yes: string[]; no: string[] },
+  comments?: ModComment[],
+  fallbackKeys: string[] = []
+): ModFeedbackRecord {
+  loadStore();
+  if (!state.modFeedback[modpackId]) {
+    state.modFeedback[modpackId] = {};
+  }
+  const existing = getModFeedback(modpackId, modId, undefined, fallbackKeys[0]);
+  if (existing) return existing;
+
+  const { record } = resolveFeedbackEntry(state.modFeedback[modpackId], modId, fallbackKeys);
+  if (votes) {
+    record.votes = {
+      yes: Array.from(new Set(votes.yes || [])),
+      no: Array.from(new Set(votes.no || [])),
+    };
+  }
+  if (comments && comments.length > 0) {
+    record.comments = [...comments];
+  }
+  saveStore();
+  return record;
+}
+
+export function toggleStoredModVote(
+  modpackId: string,
+  modId: string,
+  voterName: string,
+  vote: 'yes' | 'no',
+  fallbackKeys: string[] = []
+): { yes: string[]; no: string[] } {
+  loadStore();
+  if (!state.modFeedback[modpackId]) {
+    state.modFeedback[modpackId] = {};
+  }
+  const { record } = resolveFeedbackEntry(state.modFeedback[modpackId], modId, fallbackKeys);
+  let newYes = [...(record.votes?.yes || [])];
+  let newNo = [...(record.votes?.no || [])];
+
+  if (vote === 'yes') {
+    if (newYes.includes(voterName)) {
+      newYes = newYes.filter((u) => u !== voterName);
+    } else {
+      newYes.push(voterName);
+      newNo = newNo.filter((u) => u !== voterName);
+    }
+  } else {
+    if (newNo.includes(voterName)) {
+      newNo = newNo.filter((u) => u !== voterName);
+    } else {
+      newNo.push(voterName);
+      newYes = newYes.filter((u) => u !== voterName);
+    }
+  }
+
+  record.votes = { yes: newYes, no: newNo };
+  saveStore();
+  return { yes: [...newYes], no: [...newNo] };
+}
+
+export function addStoredModComment(
+  modpackId: string,
+  modId: string,
+  comment: ModComment,
+  fallbackKeys: string[] = []
+): ModComment[] {
+  loadStore();
+  if (!state.modFeedback[modpackId]) {
+    state.modFeedback[modpackId] = {};
+  }
+  const { record } = resolveFeedbackEntry(state.modFeedback[modpackId], modId, fallbackKeys);
+  if (!record.comments.some((c) => c.id === comment.id)) {
+    record.comments.push(comment);
+    saveStore();
+  }
+  return [...record.comments];
+}
+
+export function deleteModFeedbackItem(
+  modpackId: string,
+  modId: string,
+  fallbackKeys: string[] = []
+): void {
+  loadStore();
+  const packFeedback = state.modFeedback[modpackId];
+  if (!packFeedback) return;
+  for (const k of [modId, ...fallbackKeys]) {
+    if (k && packFeedback[k]) {
+      delete packFeedback[k];
+    }
+  }
+  saveStore();
+}
+
+export function deleteModpackFeedback(modpackId: string): void {
+  loadStore();
+  if (state.modFeedback[modpackId]) {
+    delete state.modFeedback[modpackId];
+    saveStore();
   }
 }
 
