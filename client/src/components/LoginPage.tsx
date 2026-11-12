@@ -1,43 +1,17 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Eye, EyeOff, X } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  PasswordChecklist,
+  areAllPasswordCriteriaMet,
+  getPasswordCriteria,
+} from './auth/PasswordChecklist';
 import { supabase } from '../lib/supabase';
 
 type AuthMode = 'signin' | 'signup';
 type Provider = 'discord' | 'github' | 'google';
-type StrengthLevel = 'weak' | 'fair' | 'strong';
-
-interface PasswordStrength {
-  score: number;
-  label: string;
-  level: StrengthLevel;
-  color: string;
-}
-
-function evaluatePasswordStrength(password: string): PasswordStrength {
-  if (!password) {
-    return { score: 0, label: '', level: 'weak', color: '#94A3B8' };
-  }
-
-  let score = 0;
-  if (password.length >= 8) score++;
-  if (/[A-Z]/.test(password)) score++;
-  if (/[0-9]/.test(password)) score++;
-  if (/[^A-Za-z0-9]/.test(password)) score++;
-
-  if (score <= 1) {
-    return { score, label: 'Weak', level: 'weak', color: '#94A3B8' };
-  } else if (score === 2 || score === 3) {
-    return { score, label: 'Medium', level: 'fair', color: '#F99EFF' };
-  } else {
-    return { score, label: 'Strong', level: 'strong', color: '#00A9E9' };
-  }
-}
-
-interface LoginPageProps {
-  onSuccess?: () => void;
-}
-
-export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
+export const LoginPage: React.FC = () => {
+  const navigate = useNavigate();
   const [authMode, setAuthMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -52,18 +26,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   // Real-time criteria checks
-  const criteria = useMemo(() => {
-    return {
-      minLength: password.length >= 8,
-      hasUppercase: /[A-Z]/.test(password),
-      hasNumber: /[0-9]/.test(password),
-      hasSpecial: /[^A-Za-z0-9]/.test(password),
-    };
-  }, [password]);
-
-  const allCriteriaMet =
-    criteria.minLength && criteria.hasUppercase && criteria.hasNumber && criteria.hasSpecial;
-  const strength = useMemo(() => evaluatePasswordStrength(password), [password]);
+  const criteria = useMemo(() => getPasswordCriteria(password), [password]);
+  const allCriteriaMet = areAllPasswordCriteriaMet(criteria);
 
   // Handle switching views and setting default password visibility
   const handleToggleAuthMode = (mode: AuthMode) => {
@@ -105,7 +69,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
         setLoadingAction(null);
       } else {
         console.log('[Auth] Successfully signed in:', data);
-        onSuccess?.();
+        void navigate('/', { replace: true });
       }
     } catch (err) {
       console.error('[Auth] Unexpected error during sign in:', err);
@@ -154,7 +118,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
       } else {
         console.log('[Auth] Successfully signed up:', data);
         if (data.session) {
-          onSuccess?.();
+          void navigate('/', { replace: true });
         } else {
           setInfoMessage('Registration successful! Please check your email to confirm your account.');
         }
@@ -340,35 +304,34 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
             </div>
           )}
 
-          {authMode === 'signin' ? (
-            /* Sign In Form */
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  required
-                  className="w-full px-4 py-3 rounded-xl text-sm border outline-none transition-all"
-                  style={{
-                    backgroundColor: '#161D2F',
-                    borderColor: '#24304A',
-                    color: '#F8FAFC',
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
-                />
-              </div>
+          <form onSubmit={authMode === 'signin' ? handleSignIn : handleSignUp} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Enter your email"
+                required
+                className="w-full px-4 py-3 rounded-xl text-sm border outline-none transition-all"
+                style={{
+                  backgroundColor: '#161D2F',
+                  borderColor: '#24304A',
+                  color: '#F8FAFC',
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
+              />
+            </div>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
-                    Password
-                  </label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
+                  Password
+                </label>
+                {authMode === 'signin' && (
                   <button
                     type="button"
                     onClick={handleForgotPassword}
@@ -378,72 +341,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
                   >
                     {loadingAction === 'forgot-password' ? 'Sending...' : 'Forgot Password?'}
                   </button>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full px-4 py-3 pr-12 rounded-xl text-sm border outline-none transition-all"
-                    style={{
-                      backgroundColor: '#161D2F',
-                      borderColor: '#24304A',
-                      color: '#F8FAFC',
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 transition-colors"
-                    style={{ color: '#94A3B8' }}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Primary Sign In Button */}
-              <button
-                type="submit"
-                disabled={loadingAction !== null}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                style={{
-                  backgroundColor: '#00A9E9',
-                  color: '#F8FAFC',
-                }}
-                onMouseEnter={(e) => {
-                  if (loadingAction === null) e.currentTarget.style.backgroundColor = '#F99EFF';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#00A9E9';
-                }}
-              >
-                {loadingAction === 'signin' ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <span>Sign In</span>
                 )}
-              </button>
-            </form>
-          ) : (
-            /* Sign Up Form */
-            <form onSubmit={handleSignUp} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
-                  Email
-                </label>
+              </div>
+              <div className="relative">
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
                   required
-                  className="w-full px-4 py-3 rounded-xl text-sm border outline-none transition-all"
+                  className="w-full px-4 py-3 pr-12 rounded-xl text-sm border outline-none transition-all"
                   style={{
                     backgroundColor: '#161D2F',
                     borderColor: '#24304A',
@@ -452,153 +359,44 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onSuccess }) => {
                   onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 transition-colors"
+                  style={{ color: '#94A3B8' }}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
               </div>
+            </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium" style={{ color: '#94A3B8' }}>
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full px-4 py-3 pr-12 rounded-xl text-sm border outline-none transition-all"
-                    style={{
-                      backgroundColor: '#161D2F',
-                      borderColor: '#24304A',
-                      color: '#F8FAFC',
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = '#F99EFF')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = '#24304A')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 transition-colors"
-                    style={{ color: '#94A3B8' }}
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-              </div>
+            {authMode === 'signup' && <PasswordChecklist password={password} />}
 
-              {/* Password Strength Meter & Checklist */}
-              <div
-                className="p-4 rounded-xl space-y-3 border"
-                style={{ backgroundColor: '#161D2F', borderColor: '#24304A' }}
-              >
-                {/* Strength Bar */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span style={{ color: '#94A3B8' }}>Password strength</span>
-                    {password.length > 0 && (
-                      <span className="font-medium" style={{ color: strength.color }}>
-                        {strength.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5 h-1.5">
-                    {[1, 2, 3, 4].map((segment) => {
-                      const isActive = password.length > 0 && strength.score >= segment;
-                      return (
-                        <div
-                          key={segment}
-                          className="rounded-full transition-all duration-300"
-                          style={{
-                            backgroundColor: isActive ? strength.color : '#24304A',
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Criteria Checklist */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.minLength ? '#00A9E9' : '#94A3B8' }}>
-                      {criteria.minLength ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <X className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                    <span style={{ color: criteria.minLength ? '#00A9E9' : '#94A3B8' }}>
-                      At least 8 characters
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasUppercase ? '#00A9E9' : '#94A3B8' }}>
-                      {criteria.hasUppercase ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <X className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                    <span style={{ color: criteria.hasUppercase ? '#00A9E9' : '#94A3B8' }}>
-                      Contains an uppercase letter
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasNumber ? '#00A9E9' : '#94A3B8' }}>
-                      {criteria.hasNumber ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <X className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                    <span style={{ color: criteria.hasNumber ? '#00A9E9' : '#94A3B8' }}>
-                      Contains a number
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <span style={{ color: criteria.hasSpecial ? '#00A9E9' : '#94A3B8' }}>
-                      {criteria.hasSpecial ? (
-                        <Check className="w-3.5 h-3.5" />
-                      ) : (
-                        <X className="w-3.5 h-3.5" />
-                      )}
-                    </span>
-                    <span style={{ color: criteria.hasSpecial ? '#00A9E9' : '#94A3B8' }}>
-                      Contains a special character
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Primary Sign Up Button */}
-              <button
-                type="submit"
-                disabled={loadingAction !== null || !allCriteriaMet}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mt-4"
-                style={{
-                  backgroundColor: '#00A9E9',
-                  color: '#F8FAFC',
-                }}
-                onMouseEnter={(e) => {
-                  if (loadingAction === null && allCriteriaMet) {
-                    e.currentTarget.style.backgroundColor = '#F99EFF';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#00A9E9';
-                }}
-              >
-                {loadingAction === 'signup' ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <span>Sign Up</span>
-                )}
-              </button>
-            </form>
-          )}
+            <button
+              type="submit"
+              disabled={loadingAction !== null || (authMode === 'signup' && !allCriteriaMet)}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-sm transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+              style={{
+                backgroundColor: '#00A9E9',
+                color: '#F8FAFC',
+              }}
+              onMouseEnter={(e) => {
+                if (loadingAction === null && (authMode === 'signin' || allCriteriaMet)) {
+                  e.currentTarget.style.backgroundColor = '#F99EFF';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#00A9E9';
+              }}
+            >
+              {loadingAction === authMode ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <span>{authMode === 'signin' ? 'Sign In' : 'Sign Up'}</span>
+              )}
+            </button>
+          </form>
 
           {/* Toggle View Link */}
           <div className="text-center text-xs pt-2" style={{ color: '#94A3B8' }}>
