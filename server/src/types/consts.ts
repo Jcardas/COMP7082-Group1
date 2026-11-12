@@ -51,12 +51,25 @@ export interface ModItem {
   createdAt?: string;
 }
 
+export interface ModpackInvite {
+  id: string;
+  modpackId: string;
+  modpackTitle: string;
+  invitedUser: string;
+  invitedUserId?: string;
+  invitedBy: string;
+  status: 'pending' | 'accepted' | 'declined';
+  createdAt: string;
+}
+
 export interface Modpack {
   id: string;
   title: string;
   description?: string;
   imageUrl?: string;
+  createdBy?: string;
   contributors?: string[];
+  pendingInvites?: string[];
   minecraftVersion: string;
   modLoader: 'forge' | 'fabric' | 'neoforge' | 'quilt';
   mods: ModItem[];
@@ -68,6 +81,7 @@ export interface FriendItem {
   id: string;
   username: string;
   friendCode: string;
+  userId?: string;
   avatarUrl?: string;
   bio?: string;
 }

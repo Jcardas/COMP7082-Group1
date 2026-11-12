@@ -12,16 +12,21 @@ import {
   searchMods,
 } from '../controllers/modController.js';
 import {
+  acceptModpackInvite,
   addFriend,
   addModToModpack,
   commentOnMod,
   createModpack,
+  declineModpackInvite,
   deleteFriend,
   deleteModpack,
   getHealth,
   getModpackById,
+  inviteCollaboratorToModpack,
   listFriends,
+  listModpackInvites,
   listModpacks,
+  removeModFromModpack,
   updateModpack,
   voteOnMod,
 } from '../controllers/modpackController.js';
@@ -33,9 +38,11 @@ import {
   commentModSchema,
   createModpackSchema,
   exportModpackBodySchema,
+  inviteCollaboratorSchema,
   modDependenciesQuerySchema,
   recommendationsBodySchema,
   resolveModDependenciesBodySchema,
+  respondInviteSchema,
   searchQuerySchema,
   updateModpackSchema,
   voteModSchema,
@@ -73,6 +80,7 @@ apiRouter.patch('/modpacks/:id', validateBody(updateModpackSchema), updateModpac
 apiRouter.delete('/modpacks/:id', deleteModpack);
 
 apiRouter.post('/modpacks/:id/mods', validateBody(addModSchema), addModToModpack);
+apiRouter.delete('/modpacks/:id/mods/:modId', removeModFromModpack);
 apiRouter.post('/modpacks/:id/mods/:modId/vote', validateBody(voteModSchema), voteOnMod);
 apiRouter.post(
   '/modpacks/:id/mods/:modId/comments',
@@ -80,10 +88,28 @@ apiRouter.post(
   commentOnMod
 );
 
-// 4. Modpack Zip / .mrpack Archive Export (ExportController)
+// 4. Collaborator Invitations (Invite -> Accept / Decline -> Permanent Collaborator)
+apiRouter.post(
+  '/modpacks/:id/invites',
+  validateBody(inviteCollaboratorSchema),
+  inviteCollaboratorToModpack
+);
+apiRouter.get('/invites', listModpackInvites);
+apiRouter.post(
+  '/invites/:inviteId/accept',
+  validateBody(respondInviteSchema),
+  acceptModpackInvite
+);
+apiRouter.post(
+  '/invites/:inviteId/decline',
+  validateBody(respondInviteSchema),
+  declineModpackInvite
+);
+
+// 5. Modpack Zip / .mrpack Archive Export (ExportController)
 apiRouter.post('/modpacks/:id/export', validateBody(exportModpackBodySchema), exportModpack);
 
-// 5. Collaborator Friends Endpoints (ModpackController)
+// 6. Collaborator Friends Endpoints (ModpackController)
 apiRouter.get('/friends', listFriends);
 apiRouter.post('/friends', validateBody(addFriendSchema), addFriend);
 apiRouter.delete('/friends/:id', deleteFriend);

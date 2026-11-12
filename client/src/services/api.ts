@@ -1,6 +1,20 @@
-import type { DependencyAnalysisResult, FriendItem, ModItem, Modpack } from '../types/consts';
+import type {
+  DependencyAnalysisResult,
+  FriendItem,
+  ModItem,
+  Modpack,
+  ModpackInvite,
+} from '../types/consts';
 
 const BASE_URL = '/api';
+
+export class ModpackNotFoundError extends Error {
+  status = 404;
+  constructor(id: string) {
+    super(`Modpack "${id}" was not found`);
+    this.name = 'ModpackNotFoundError';
+  }
+}
 
 export interface SearchFilterOptions {
   query?: string;
@@ -112,6 +126,9 @@ export async function listModpacks(): Promise<Modpack[]> {
 
 export async function getModpack(id: string): Promise<Modpack> {
   const res = await fetch(`${BASE_URL}/modpacks/${id}`);
+  if (res.status === 404) {
+    throw new ModpackNotFoundError(id);
+  }
   if (!res.ok) throw new Error('Failed to fetch modpack');
   return res.json();
 }
@@ -121,8 +138,11 @@ export async function createModpack(payload: {
   description?: string;
   imageUrl?: string;
   contributors?: string[];
+  pendingInvites?: string[];
   minecraftVersion?: string;
   modLoader?: Modpack['modLoader'];
+  createdBy?: string;
+  creatorName?: string;
 }): Promise<Modpack> {
   const res = await fetch(`${BASE_URL}/modpacks`, {
     method: 'POST',
@@ -143,11 +163,87 @@ export async function updateModpack(id: string, payload: Partial<Modpack>): Prom
   return res.json();
 }
 
+export async function addModToPackApi(modpackId: string, mod: ModItem): Promise<ModItem> {
+  const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/mods`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mod),
+  });
+  if (!res.ok) throw new Error('Failed to add mod to modpack');
+  return res.json();
+}
+
+export async function removeModFromPackApi(modpackId: string, modId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/mods/${encodeURIComponent(modId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to remove mod from modpack');
+}
+
 export async function deleteModpack(id: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/modpacks/${id}`, {
     method: 'DELETE',
   });
   if (!res.ok) throw new Error('Failed to delete modpack');
+}
+
+export async function sendModpackInvite(
+  modpackId: string,
+  payload: {
+    invitedUser: string;
+    invitedUserId?: string;
+    invitedBy?: string;
+  }
+): Promise<ModpackInvite> {
+  const res = await fetch(`${BASE_URL}/modpacks/${modpackId}/invites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to send modpack invite');
+  return res.json();
+}
+
+export async function listModpackInvites(params?: {
+  user?: string;
+  friendCode?: string;
+  userId?: string;
+}): Promise<ModpackInvite[]> {
+  const search = new URLSearchParams();
+  if (params?.user) search.set('user', params.user);
+  if (params?.friendCode) search.set('friendCode', params.friendCode);
+  if (params?.userId) search.set('userId', params.userId);
+  const query = search.toString() ? `?${search.toString()}` : '';
+  const res = await fetch(`${BASE_URL}/invites${query}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.invites || [];
+}
+
+export async function acceptModpackInvite(
+  inviteId: string,
+  payload: { userId?: string; username?: string }
+): Promise<{ invite: ModpackInvite; modpack?: Modpack }> {
+  const res = await fetch(`${BASE_URL}/invites/${inviteId}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to accept modpack invite');
+  return res.json();
+}
+
+export async function declineModpackInvite(
+  inviteId: string,
+  payload?: { userId?: string; username?: string }
+): Promise<{ invite: ModpackInvite }> {
+  const res = await fetch(`${BASE_URL}/invites/${inviteId}/decline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  if (!res.ok) throw new Error('Failed to decline modpack invite');
+  return res.json();
 }
 
 export async function listFriends(): Promise<FriendItem[]> {

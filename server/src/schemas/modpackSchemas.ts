@@ -81,12 +81,14 @@ export const createModpackSchema = z.object({
     .default(''),
   imageUrl: z.string().optional().default('/MCMC.png'),
   contributors: z.array(z.string()).optional().default([]),
+  pendingInvites: z.array(z.string()).optional().default([]),
   minecraftVersion: z
     .string()
     .trim()
     .min(1, 'Minecraft version is required'),
   modLoader: modLoaderEnum.default('forge'),
   createdBy: z.string().trim().min(1).optional().default('Anonymous'),
+  creatorName: z.string().trim().optional(),
 });
 
 /**
@@ -106,6 +108,7 @@ export const updateModpackSchema = z.object({
     .optional(),
   imageUrl: z.string().optional(),
   contributors: z.array(z.string()).optional(),
+  pendingInvites: z.array(z.string()).optional(),
   minecraftVersion: z
     .string()
     .trim()
@@ -113,6 +116,23 @@ export const updateModpackSchema = z.object({
     .optional(),
   modLoader: modLoaderEnum.optional(),
   mods: z.array(z.any()).optional(),
+});
+
+/**
+ * Schema for inviting a collaborator to a modpack
+ */
+export const inviteCollaboratorSchema = z.object({
+  invitedUser: z.string().trim().min(1, 'Invited username or friend code is required'),
+  invitedUserId: z.string().trim().optional(),
+  invitedBy: z.string().trim().optional().default('Collaborator'),
+});
+
+/**
+ * Schema for responding to a collaborator invite ('accept' | 'decline')
+ */
+export const respondInviteSchema = z.object({
+  userId: z.string().trim().optional(),
+  username: z.string().trim().optional(),
 });
 
 /**

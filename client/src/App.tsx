@@ -1,9 +1,5 @@
-// Client side main app entry point.
-
-import { useState } from 'react';
-import { ActiveModpackView } from './components/ActiveModpackView';
-import { CollaborationSidebar } from './components/CollaborationSidebar';
-import { ExportModal } from './components/ExportModal';
+import { useCallback, useState } from 'react';
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { FriendsView } from './components/FriendsView';
 import { LoginPage } from './components/LoginPage';
 import { ModpackProjectsView } from './components/ModpackProjectsView';
@@ -11,131 +7,126 @@ import { Navbar, type ActiveTab } from './components/Navbar';
 import { ProfileView } from './components/ProfileView';
 import { SearchDiscoverView } from './components/SearchDiscoverView';
 import { useAuth } from './hooks/useAuth';
-import { useCollabSocket } from './hooks/useCollabSocket';
-import { useDependencyAnalysis } from './hooks/useDependencyAnalysis';
 import { useModpack } from './hooks/useModpack';
+import { ModpackWorkspaceRoute } from './routes/ModpackWorkspaceRoute';
+import { NotFoundView } from './routes/NotFoundView';
+import { ProtectedRoute } from './routes/ProtectedRoute';
+
+const TAB_ROUTES: Record<ActiveTab, string> = { main: '/', modpack: '/', search: '/search', friends: '/friends', profile: '/profile' };
+
+function pathToTab(pathname: string): ActiveTab {
+  if (pathname.startsWith('/modpack/')) return 'modpack';
+  if (pathname.startsWith('/search')) return 'search';
+  if (pathname.startsWith('/friends')) return 'friends';
+  if (pathname.startsWith('/profile')) return 'profile';
+  return 'main';
+}
 
 export function App() {
-  const [modpackId, setModpackId] = useState('demo-modpack');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('main');
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [showLoginPage, setShowLoginPage] = useState(true);
-
   const auth = useAuth();
-  const pack = useModpack(modpackId, auth.displayName);
-  const collab = useCollabSocket(modpackId, auth.displayName, {
-    onModAdded: pack.applyRemoteModAdded,
-    onModRemoved: pack.applyRemoteModRemoved,
-    onModVoted: pack.applyRemoteModVoted,
-    onModCommented: pack.applyRemoteModCommented,
-  });
-  useDependencyAnalysis(pack.modpack.mods);
+  const [lastModpackId, setLastModpackId] = useState(() => localStorage.getItem('mcmc_active_modpack_id') || '');
+  const [lastModpackTitle, setLastModpackTitle] = useState(() => localStorage.getItem('mcmc_active_modpack_title') || '');
+  const pack = useModpack(lastModpackId || 'demo-modpack', auth.displayName, auth.userId, auth.friendCode);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const redirectPath = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
 
-  if (!auth.isAuthenticated && showLoginPage) {
-    return <LoginPage onSuccess={() => setShowLoginPage(false)} />;
-  }
+  const handleActiveModpackChange = useCallback((id: string, title: string) => {
+    setLastModpackId(id);
+    setLastModpackTitle(title);
+    localStorage.setItem('mcmc_active_modpack_id', id);
+    localStorage.setItem('mcmc_active_modpack_title', title);
+  }, []);
 
   const handleSignOut = async () => {
     await auth.signOut();
-    setShowLoginPage(true);
+    void navigate('/login');
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans">
-      {collab.notification && (
-        <div className="fixed bottom-4 right-4 z-50 border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs text-white">
-          {collab.notification}
-        </div>
-      )}
-      <Navbar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        currentUser={auth.displayName}
-        isAuthenticated={auth.isAuthenticated}
-        onSignOut={() => void handleSignOut()}
+    <Routes>
+      <Route
+        path="/login"
+        element={
+          auth.isAuthenticated ? (
+            <Navigate to={redirectPath} replace />
+          ) : (
+            <LoginPage onSuccess={() => { auth.markAuthenticated(); void navigate(redirectPath, { replace: true }); }} />
+          )
+        }
       />
-      <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-6 space-y-6">
-        {activeTab === 'main' && (
-          <ModpackProjectsView
-            modpacks={pack.modpacks}
-            friends={pack.friends}
-            onSelectModpack={(selected) => {
-              setModpackId(selected.id);
-              pack.setModpack(selected);
-              setActiveTab('modpack');
-            }}
-            onCreateModpack={pack.createNewModpack}
-            onEditModpack={pack.editModpackProject}
-            onDeleteModpack={pack.deleteModpackProject}
-          />
-        )}
-        {activeTab === 'modpack' && (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-            <div className="lg:col-span-8">
-              <ActiveModpackView
-                modpack={pack.modpack}
+      <Route
+        element={
+          <ProtectedRoute isAuthenticated={auth.isAuthenticated} isLoading={auth.isLoading}>
+            <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans">
+              <Navbar
+                activeTab={pathToTab(location.pathname)}
+                onTabChange={(tab) => void navigate(TAB_ROUTES[tab])}
                 currentUser={auth.displayName}
-                recommendations={pack.recommendations}
-                isLoadingRecs={pack.isLoadingRecs}
-                installedModIds={pack.installedModIds}
-                onRefreshRecommendations={pack.fetchRecommendations}
-                onAddMod={pack.addMod}
-                onRemoveMod={pack.removeMod}
-                onVoteMod={pack.voteMod}
-                onCommentMod={pack.commentMod}
-                onOpenExport={() => setIsExportModalOpen(true)}
-                onGoToSearch={() => setActiveTab('search')}
-                onBackToProjects={() => setActiveTab('main')}
+                isAuthenticated={auth.isAuthenticated}
+                activeModpackId={lastModpackId || undefined}
+                activeModpackTitle={lastModpackTitle || undefined}
+                canGoBack={location.pathname !== '/'}
+                onGoBack={() => void navigate(-1)}
+                onOpenActiveModpack={() => { if (lastModpackId) void navigate(`/modpack/${lastModpackId}`); }}
+                onSignOut={() => void handleSignOut()}
               />
+              <main className="mx-auto flex-1 w-full max-w-7xl px-4 py-6 space-y-6">
+                <Outlet />
+              </main>
             </div>
-            <div className="lg:col-span-4">
-              <CollaborationSidebar
-                currentUser={auth.displayName}
-                contributors={pack.modpack.contributors || []}
-                activeUsers={collab.activeUsers}
-                friends={pack.friends}
-                onInviteContributor={(code) => void pack.inviteContributor(pack.modpack.id, code)}
-              />
-            </div>
-          </div>
-        )}
-        {activeTab === 'search' && (
-          <SearchDiscoverView
-            {...pack}
-            activeModpackId={pack.modpack.id}
-            onSearch={pack.handleSearch}
-            onLoaderChange={pack.updateLoader}
-            onVersionChange={pack.updateVersion}
-            onCategoryChange={pack.setSelectedCategory}
-            onSourceChange={pack.setSelectedSource}
-            onPageChange={pack.setSearchPage}
-            onAddModToPack={pack.addModToTargetPack}
-          />
-        )}
-        {activeTab === 'friends' && (
-          <FriendsView
-            friends={pack.friends}
-            modpacks={pack.modpacks}
-            onAddFriend={pack.createFriend}
-            onRemoveFriend={pack.deleteFriend}
-            onInviteFriendToModpack={pack.inviteContributor}
-          />
-        )}
-        {activeTab === 'profile' && (
-          <ProfileView
-            username={auth.displayName}
-            email={auth.email}
-            avatarUrl={auth.avatarUrl}
-            friendCode={auth.friendCode}
-            onUpdateProfile={auth.updateProfile}
-            onUpdateEmail={auth.updateUserEmail}
-            onUpdatePassword={auth.updateUserPassword}
-            onDeleteAccount={handleSignOut}
-          />
-        )}
-      </main>
-      <ExportModal isOpen={isExportModalOpen} onClose={() => setIsExportModalOpen(false)} modpack={pack.modpack} />
-    </div>
+          </ProtectedRoute>
+        }
+      >
+        <Route
+          path="/"
+          element={
+            <ModpackProjectsView
+              {...pack}
+              activeModpackId={lastModpackId || undefined}
+              onSelectModpack={(selected) => {
+                handleActiveModpackChange(selected.id, selected.title);
+                void navigate(`/modpack/${selected.id}`);
+              }}
+              onCreateModpack={pack.createNewModpack}
+              onEditModpack={pack.editModpackProject}
+              onDeleteModpack={pack.deleteModpackProject}
+              onInviteContributor={pack.inviteContributor}
+            />
+          }
+        />
+        <Route
+          path="/modpack/:id"
+          element={
+            <ModpackWorkspaceRoute
+              currentUser={auth.displayName}
+              currentUserId={auth.userId}
+              currentFriendCode={auth.friendCode}
+              onActiveModpackChange={handleActiveModpackChange}
+            />
+          }
+        />
+        <Route
+          path="/search"
+          element={
+            <SearchDiscoverView
+              {...pack}
+              activeModpackId={lastModpackId || pack.modpack.id}
+              onSearch={pack.handleSearch}
+              onLoaderChange={pack.updateLoader}
+              onVersionChange={pack.updateVersion}
+              onCategoryChange={pack.setSelectedCategory}
+              onSourceChange={pack.setSelectedSource}
+              onPageChange={pack.setSearchPage}
+              onAddModToPack={pack.addModToTargetPack}
+            />
+          }
+        />
+        <Route path="/friends" element={<FriendsView {...pack} onAddFriend={pack.createFriend} onRemoveFriend={pack.deleteFriend} onInviteFriendToModpack={pack.inviteContributor} />} />
+        <Route path="/profile" element={<ProfileView username={auth.displayName} email={auth.email} avatarUrl={auth.avatarUrl} friendCode={auth.friendCode} onUpdateProfile={auth.updateProfile} onUpdateEmail={auth.updateUserEmail} onUpdatePassword={auth.updateUserPassword} onDeleteAccount={handleSignOut} />} />
+        <Route path="*" element={<NotFoundView />} />
+      </Route>
+    </Routes>
   );
 }
 
