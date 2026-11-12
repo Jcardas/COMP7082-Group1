@@ -51,7 +51,7 @@ export function App() {
           auth.isAuthenticated ? (
             <Navigate to={redirectPath} replace />
           ) : (
-            <LoginPage onSuccess={() => { auth.markAuthenticated(); void navigate(redirectPath, { replace: true }); }} />
+            <LoginPage />
           )
         }
       />
